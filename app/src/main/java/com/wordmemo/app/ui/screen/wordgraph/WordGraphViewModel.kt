@@ -135,31 +135,33 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
         return MultiLevelGraph(centerWord = centerWord, nodes = allNodes, edges = allEdges)
     }
 
-    /** 为未收录的中心词生成模板化关系 */
+    /** 为未收录的中心词回退：从 chineseMap 按 seed 选真实单词 */
     private fun buildFallbackRelations(centerWord: String): WordRelations {
         val seed = centerWord.lowercase().hashCode().toLong()
         val rng = java.util.Random(seed)
-        val key = centerWord.lowercase()
+        val avail = chineseMap.keys.filter { it != centerWord.lowercase() }.toMutableList()
 
-        val l1List = listOf(
-            RelWord("${centerWord}_related", "相关", "synonym"),
-            RelWord("${centerWord}_opposite", "相反", "antonym"),
-            RelWord("${centerWord}_usage", "用法", "collocation"),
-            RelWord("${centerWord}_variant", "变体", "similar"),
-            RelWord("${centerWord}_concept", "概念", "concept"),
-            RelWord("${centerWord}_synonym2", "同义", "synonym"),
-            RelWord("${centerWord}_antonym2", "反义", "antonym")
-        )
+        val typeLabels = listOf("同义", "反义", "搭配", "形近", "概念", "同义", "反义")
+        val typeCycle = listOf("synonym", "antonym", "collocation", "similar", "concept", "synonym", "antonym")
 
-        val l1 = l1List.map { rel ->
-            val l2 = listOf(
-                RelWord("${rel.word}_detail1", "详细", "similar"),
-                RelWord("${rel.word}_detail2", "扩展", "collocation")
-            )
-            WordRel(rel.word, rel.chinese, l2)
-        }
+        val l1 = (0 until 7).map { branch ->
+            if (avail.isEmpty()) return@map WordRel("_", "", emptyList())
+            val idx = (rng.nextInt() and Int.MAX_VALUE) % avail.size
+            val w1 = avail.removeAt(idx)
+            val c1 = chineseMap[w1] ?: w1
 
-        return WordRelations(l1)
+            val l2 = (0 until 2).map {
+                if (avail.isEmpty()) return@map RelWord("_", "", "")
+                val ci = (rng.nextInt() and Int.MAX_VALUE) % avail.size
+                val w2 = avail.removeAt(ci)
+                val c2 = chineseMap[w2] ?: w2
+                RelWord(w2, c2, typeCycle[(branch + it + 1) % typeCycle.size])
+            }
+
+            WordRel(w1, c1, l2)
+        }.filter { it.word != "_" }
+
+        return WordRelations(if (l1.isEmpty()) listOf(WordRel(centerWord, lookupChinese(centerWord))) else l1)
     }
 
     private fun lookupChinese(word: String): String {

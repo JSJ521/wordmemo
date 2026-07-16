@@ -309,14 +309,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                         if (id == downloadId) {
                             _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 下载完成，正在安装...")
-                            val apkFile = File(
-                                android.os.Environment.getExternalStoragePublicDirectory(
-                                    android.os.Environment.DIRECTORY_DOWNLOADS
-                                ),
-                                fileName
-                            )
-                            if (apkFile.exists()) checker.installApk(apkFile)
                             app.unregisterReceiver(this)
+                            // 延迟片刻等待 DownloadManager 写盘完成
+                            kotlinx.coroutines.MainScope().launch {
+                                kotlinx.coroutines.delay(1000)
+                                checker.installDownloadedApk(downloadId)
+                            }
                         }
                     }
                 }

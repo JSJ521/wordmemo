@@ -85,19 +85,53 @@ class UpdateChecker(private val context: Context) {
         }
     }
 
-    /** 使用 DownloadManager 下载 APK */
+    /** 使用 DownloadManager 下载 APK 到应用私目录 */
     fun downloadApk(downloadUrl: String, fileName: String): Long {
+        val destDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: context.cacheDir
+        val destination = Uri.fromFile(File(destDir, fileName))
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val request = DownloadManager.Request(Uri.parse(downloadUrl))
             .setTitle("书鼠词记 更新")
             .setDescription("正在下载新版本...")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            .setDestinationUri(destination)
             .setMimeType("application/vnd.android.package-archive")
         return downloadManager.enqueue(request)
     }
 
-    /** 安装已下载的 APK（Android 7+ 需要 FileProvider） */
+    /** 通过 DownloadManager 查询下载文件 URI 并安装 */
+    fun installDownloadedApk(downloadId: Long) {
+        try {
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val query = DownloadManager.Query().setFilterById(downloadId)
+            val cursor = dm.query(query)
+            if (cursor.moveToFirst()) {
+                val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                    val uriStr = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))
+                    val fileUri = Uri.parse(uriStr)
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(fileUri, "application/vnd.android.package-archive")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    try {
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        // 如果直接打开 Content URI 失败，回退到 FileProvider
+                        val file = File(fileUri.path ?: "")
+                        if (file.exists()) installApk(file)
+                    }
+                }
+            }
+            cursor.close()
+        } catch (e: Exception) {
+            android.util.Log.w("UpdateChecker", "安装失败: ${e.message}")
+        }
+    }
+
+    /** 安装已下载的 APK（回退方案：FileProvider） */
     fun installApk(apkFile: File) {
         val uri = FileProvider.getUriForFile(
             context,
