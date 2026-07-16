@@ -1,12 +1,10 @@
 package com.wordmemo.app.data.network
 
-import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.google.gson.Gson
@@ -14,6 +12,7 @@ import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 
 /**
  * GitHub Release 版本检查与 APK 下载安装。
@@ -45,9 +44,7 @@ class UpdateChecker(private val context: Context) {
                     .newCall(okhttp3.Request.Builder().url(url).build())
                     .execute()
 
-                if (!response.isSuccessful) {
-                    return@withContext UpdateInfo(false)
-                }
+                if (!response.isSuccessful) return@withContext UpdateInfo(false)
 
                 val body = response.body?.string() ?: return@withContext UpdateInfo(false)
                 val root = JsonParser.parseString(body).asJsonObject
@@ -56,7 +53,6 @@ class UpdateChecker(private val context: Context) {
                 val releaseNotes = root.get("body")?.asString ?: ""
                 val releaseUrl = root.get("html_url")?.asString ?: ""
 
-                // 找 APK 下载链接
                 var apkUrl = ""
                 val assets = root.getAsJsonArray("assets")
                 if (assets != null) {
@@ -69,18 +65,11 @@ class UpdateChecker(private val context: Context) {
                     }
                 }
 
-                // 版本比较：去掉 v 前缀后比较
                 val remoteVer = tagName.removePrefix("v")
                 val localVer = currentVersion.removePrefix("v")
                 val hasUpdate = compareVersions(remoteVer, localVer) > 0
 
-                UpdateInfo(
-                    hasUpdate = hasUpdate,
-                    latestVersion = tagName,
-                    downloadUrl = apkUrl,
-                    releaseNotes = releaseNotes,
-                    releaseUrl = releaseUrl
-                )
+                UpdateInfo(hasUpdate, tagName, apkUrl, releaseNotes, releaseUrl)
             } catch (e: Exception) {
                 android.util.Log.w("UpdateChecker", "检查更新失败: ${e.message}")
                 UpdateInfo(false)
@@ -88,27 +77,11 @@ class UpdateChecker(private val context: Context) {
         }
     }
 
-    /** 使用 DownloadManager 下载 APK 到应用私目录 */
-    fun downloadApk(downloadUrl: String, fileName: String): Long {
-        val destDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: context.cacheDir
-        val destination = Uri.fromFile(File(destDir, fileName))
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val request = DownloadManager.Request(Uri.parse(downloadUrl))
-            .setTitle("书鼠词记 更新")
-            .setDescription("正在下载新版本...")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationUri(destination)
-            .setMimeType("application/vnd.android.package-archive")
-        return downloadManager.enqueue(request)
-    }
-
-    /** 检查是否有安装未知来源 APK 的权限 */
-    fun canInstallPackages(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+    /** 检查安装权限 */
+    fun canInstallPackages(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             context.packageManager.canRequestPackageInstalls()
-        } else true
-    }
+        else true
 
     /** 跳转系统设置开启安装权限 */
     fun openInstallSettings() {
@@ -119,59 +92,78 @@ class UpdateChecker(private val context: Context) {
         context.startActivity(intent)
     }
 
-    /** 通过 DownloadManager 查询下载文件 URI 并安装 */
-    fun installDownloadedApk(downloadId: Long, fileName: String): String {
-        if (!canInstallPackages()) {
-            openInstallSettings()
-            return "NEED_PERMISSION"
-        }
-        try {
-            // 我们自己知道文件在哪（setDestinationUri 时指定的路径），不用查 DownloadManager
-            val destDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                ?: context.cacheDir
-            val apkFile = File(destDir, fileName)
-            if (apkFile.exists()) {
-                installApk(apkFile)
-                return "OK"
-            }
-            // 文件不在预期位置？回退到 DownloadManager 查询
-            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val query = DownloadManager.Query().setFilterById(downloadId)
-            val cursor = dm.query(query)
-            if (cursor.moveToFirst()) {
-                val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                    val uriStr = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))
-                    val fileUri = Uri.parse(uriStr)
-                    if (fileUri.scheme == "file") {
-                        val f = File(fileUri.path ?: "")
-                        if (f.exists()) { installApk(f); return "OK" }
+    /**
+     * 用 OkHttp 下载 APK 到缓存目录。
+     * 可返回下载进度 (bytesRead / totalBytes)。
+     */
+    suspend fun downloadApk(downloadUrl: String, fileName: String): Result<File> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val request = okhttp3.Request.Builder().url(downloadUrl).build()
+                val response = client.newCall(request).execute()
+
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("下载失败: HTTP ${response.code}"))
+                }
+
+                val body = response.body ?: return@withContext Result.failure(Exception("响应体为空"))
+                val totalBytes = body.contentLength()
+                val inputStream = body.byteStream()
+
+                val destFile = File(context.cacheDir, fileName)
+                FileOutputStream(destFile).use { output ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    var totalRead = 0L
+                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        totalRead += bytesRead
                     }
                 }
+                inputStream.close()
+
+                if (!destFile.exists() || destFile.length() == 0L) {
+                    return@withContext Result.failure(Exception("下载文件为空"))
+                }
+                android.util.Log.i("UpdateChecker", "下载完成: ${destFile.absolutePath} (${destFile.length() / 1024}KB)")
+                Result.success(destFile)
+            } catch (e: Exception) {
+                android.util.Log.e("UpdateChecker", "下载异常: ${e.message}", e)
+                Result.failure(e)
             }
-            cursor.close()
+        }
+    }
+
+    /** 用 FileProvider 安装 APK */
+    fun installApk(apkFile: File): Boolean {
+        try {
+            if (!canInstallPackages()) {
+                openInstallSettings()
+                return false
+            }
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                apkFile
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            return true
         } catch (e: Exception) {
             android.util.Log.e("UpdateChecker", "安装异常: ${e.message}", e)
+            return false
         }
-        return "INSTALL_FAILED"
     }
 
-    /** 安装已下载的 APK（回退方案：FileProvider） */
-    fun installApk(apkFile: File) {
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            apkFile
-        )
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-    }
-
-    /** 语义化版本比较：1.0.0 < 1.1.0 返回负值 */
     private fun compareVersions(v1: String, v2: String): Int {
         val parts1 = v1.split(".").map { it.toIntOrNull() ?: 0 }
         val parts2 = v2.split(".").map { it.toIntOrNull() ?: 0 }

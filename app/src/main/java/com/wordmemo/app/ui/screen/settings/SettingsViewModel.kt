@@ -1,12 +1,7 @@
 package com.wordmemo.app.ui.screen.settings
 
 import android.app.Application
-import android.app.DownloadManager
-import android.content.BroadcastReceiver
 import android.content.ContentResolver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
@@ -27,7 +22,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 data class SettingsUiState(
     val apiKey: String = "",
@@ -299,36 +293,44 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             try {
                 val checker = UpdateChecker(getApplication())
-                val fileName = "WordMemo-${info.latestVersion}.apk"
-                val downloadId = checker.downloadApk(info.downloadUrl, fileName)
-                _uiState.value = _uiState.value.copy(updateCheckResult = "⏳ 开始下载 ${info.latestVersion}...")
 
-                val app = getApplication<android.app.Application>()
-                val receiver = object : BroadcastReceiver() {
-                    override fun onReceive(ctx: Context, intent: Intent) {
-                        val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
-                        if (id == downloadId) {
-                            _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 下载完成，正在安装...")
-                            app.unregisterReceiver(this)
-                            kotlinx.coroutines.MainScope().launch {
-                                kotlinx.coroutines.delay(1000)
-                                val result = checker.installDownloadedApk(downloadId, fileName)
-                                if (result == "NEED_PERMISSION") {
-                                    _uiState.value = _uiState.value.copy(
-                                        updateCheckResult = "⚠️ 请在系统弹窗中允许「安装未知来源应用」，然后重新更新"
-                                    )
-                                } else if (result != "OK") {
-                                    _uiState.value = _uiState.value.copy(
-                                        updateCheckResult = "❌ 安装失败，请手动安装: ${info.downloadUrl}"
-                                    )
-                                }
-                            }
-                        }
-                    }
+                // 先检查安装权限
+                if (!checker.canInstallPackages()) {
+                    _uiState.value = _uiState.value.copy(
+                        updateCheckResult = "⚠️ 需要开启「安装未知应用」权限"
+                    )
+                    checker.openInstallSettings()
+                    return@launch
                 }
-                app.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+
+                val fileName = "WordMemo-${info.latestVersion}.apk"
+                _uiState.value = _uiState.value.copy(updateCheckResult = "⏳ 正在下载 ${info.latestVersion}...")
+
+                // OkHttp 直接下载到缓存目录
+                val result = withContext(Dispatchers.IO) {
+                    checker.downloadApk(info.downloadUrl, fileName)
+                }
+
+                result.fold(
+                    onSuccess = { apkFile ->
+                        _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 下载完成，正在安装...")
+                        // 延迟片刻等文件写盘
+                        kotlinx.coroutines.delay(500)
+                        val installed = checker.installApk(apkFile)
+                        if (installed) {
+                            _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 安装引导已打开")
+                        } else {
+                            _uiState.value = _uiState.value.copy(updateCheckResult = "❌ 安装失败，请手动安装: ${info.downloadUrl}")
+                        }
+                    },
+                    onFailure = { e ->
+                        _uiState.value = _uiState.value.copy(
+                            updateCheckResult = "❌ 下载失败: ${e.message}"
+                        )
+                    }
+                )
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(updateCheckResult = "❌ 下载失败: ${e.message}")
+                _uiState.value = _uiState.value.copy(updateCheckResult = "❌ 更新失败: ${e.message}")
             }
         }
     }
