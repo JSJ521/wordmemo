@@ -111,17 +111,19 @@ class UpdateChecker(private val context: Context) {
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
                     val uriStr = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))
                     val fileUri = Uri.parse(uriStr)
-                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(fileUri, "application/vnd.android.package-archive")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    try {
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        // 如果直接打开 Content URI 失败，回退到 FileProvider
+
+                    if (fileUri.scheme == "file") {
+                        // Android 7+ 禁止 file:// Intent → 走 FileProvider
                         val file = File(fileUri.path ?: "")
                         if (file.exists()) installApk(file)
+                    } else {
+                        // content:// URI 可直接 Intent
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(fileUri, "application/vnd.android.package-archive")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
                     }
                 }
             }
