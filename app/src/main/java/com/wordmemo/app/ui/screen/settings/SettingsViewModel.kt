@@ -296,48 +296,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun downloadUpdate(info: UpdateChecker.UpdateInfo) {
         _uiState.value = _uiState.value.copy(pendingUpdate = null)
-        viewModelScope.launch {
-            try {
-                val checker = UpdateChecker(getApplication())
-
-                // 先检查安装权限
-                if (!checker.canInstallPackages()) {
-                    _uiState.value = _uiState.value.copy(
-                        updateCheckResult = "⚠️ 需要开启「安装未知应用」权限"
-                    )
-                    checker.openInstallSettings()
-                    return@launch
-                }
-
-                val fileName = "WordMemo-${info.latestVersion}.apk"
-                _uiState.value = _uiState.value.copy(updateCheckResult = "⏳ 正在下载 ${info.latestVersion}...")
-
-                // OkHttp 直接下载到缓存目录
-                val result = withContext(Dispatchers.IO) {
-                    checker.downloadApk(info.downloadUrl, fileName)
-                }
-
-                result.fold(
-                    onSuccess = { apkFile ->
-                        _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 下载完成，正在安装...")
-                        // 延迟片刻等文件写盘
-                        kotlinx.coroutines.delay(500)
-                        val installed = checker.installApk(apkFile, info.downloadUrl)
-                        if (installed) {
-                            _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 安装引导已打开")
-                        } else {
-                            _uiState.value = _uiState.value.copy(updateCheckResult = "⚠️ 已打开浏览器，请下载并安装 APK")
-                        }
-                    },
-                    onFailure = { e ->
-                        _uiState.value = _uiState.value.copy(
-                            updateCheckResult = "❌ 下载失败: ${e.message}"
-                        )
-                    }
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(updateCheckResult = "❌ 更新失败: ${e.message}")
-            }
+        // 直接打开浏览器下载（最可靠的方式）
+        try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(info.downloadUrl))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            getApplication<android.app.Application>().startActivity(intent)
+            _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 已打开浏览器，请下载并安装 APK")
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(updateCheckResult = "❌ 打开失败: ${e.message}\n${info.downloadUrl}")
         }
     }
 }

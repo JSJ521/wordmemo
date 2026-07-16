@@ -13,7 +13,7 @@
         android:name=".WordMemoApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="书鼠词记"
+        android:label="词鼠书记"
         android:supportsRtl="true"
         android:theme="@style/Theme.WordMemo">
 

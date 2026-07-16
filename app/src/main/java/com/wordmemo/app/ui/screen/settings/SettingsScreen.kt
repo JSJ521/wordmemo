@@ -181,7 +181,7 @@ fun SettingsScreen(
 
             Text("数据管理", fontWeight = FontWeight.Bold, fontSize = 20.sp)
             Button(
-                onClick = { exportLauncher.launch("书鼠词记_备份.json") },
+                onClick = { exportLauncher.launch("词鼠书记_备份.json") },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("导出备份")

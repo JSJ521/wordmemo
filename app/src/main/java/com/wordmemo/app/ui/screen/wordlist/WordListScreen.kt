@@ -44,7 +44,7 @@ fun WordListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("书鼠词记") },
+                title = { Text("词鼠书记") },
                 actions = {
                     BadgedBox(badge = {
                         if (uiState.dueCount > 0) {
@@ -275,7 +275,7 @@ private fun AiVocabSection(
                         Icon(Icons.Default.Refresh, contentDescription = null,
                             modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("生成 8 个", fontSize = 13.sp)
+                        Text("随机生成", fontSize = 13.sp)
                     }
                 }
             }
