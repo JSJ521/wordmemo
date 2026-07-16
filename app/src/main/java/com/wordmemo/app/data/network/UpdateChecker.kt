@@ -131,8 +131,8 @@ class UpdateChecker(private val context: Context) {
         }
     }
 
-    /** 用 FileProvider 安装 APK */
-    fun installApk(apkFile: File): Boolean {
+    /** 用 FileProvider 安装 APK，失败时打开浏览器下载 */
+    fun installApk(apkFile: File, fallbackUrl: String = ""): Boolean {
         try {
             if (!canInstallPackages()) {
                 openInstallSettings()
@@ -151,7 +151,15 @@ class UpdateChecker(private val context: Context) {
             context.startActivity(intent)
             return true
         } catch (e: Exception) {
-            android.util.Log.e("UpdateChecker", "安装异常: ${e.message}", e)
+            android.util.Log.e("UpdateChecker", "安装Intent失败: ${e.message}", e)
+            // 兜底：打开浏览器下载
+            if (fallbackUrl.isNotBlank()) {
+                try {
+                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(fallbackUrl))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(browserIntent)
+                } catch (_: Exception) { }
+            }
             return false
         }
     }

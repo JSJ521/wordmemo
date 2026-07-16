@@ -322,11 +322,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 下载完成，正在安装...")
                         // 延迟片刻等文件写盘
                         kotlinx.coroutines.delay(500)
-                        val installed = checker.installApk(apkFile)
+                        val installed = checker.installApk(apkFile, info.downloadUrl)
                         if (installed) {
                             _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 安装引导已打开")
                         } else {
-                            _uiState.value = _uiState.value.copy(updateCheckResult = "❌ 安装失败，请手动安装: ${info.downloadUrl}")
+                            _uiState.value = _uiState.value.copy(updateCheckResult = "⚠️ 已打开浏览器，请下载并安装 APK")
                         }
                     },
                     onFailure = { e ->
