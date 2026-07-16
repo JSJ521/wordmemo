@@ -1,7 +1,12 @@
 package com.wordmemo.app.ui.screen.settings
 
 import android.app.Application
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
 import android.content.ContentResolver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
@@ -13,6 +18,7 @@ import com.wordmemo.app.data.local.WordMemoDatabase
 import com.wordmemo.app.data.local.entity.WordEntity
 import com.wordmemo.app.data.network.AiApiClient
 import com.wordmemo.app.data.network.NetworkMonitor
+import com.wordmemo.app.data.network.UpdateChecker
 import com.wordmemo.app.util.Constants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 data class SettingsUiState(
     val apiKey: String = "",
@@ -30,7 +37,10 @@ data class SettingsUiState(
     val connectionTestResult: String? = null,
     val isTestingConnection: Boolean = false,
     val exportResult: String? = null,
-    val isOnline: Boolean = false
+    val isOnline: Boolean = false,
+    val isCheckingUpdate: Boolean = false,
+    val updateCheckResult: String? = null,
+    val pendingUpdate: UpdateChecker.UpdateInfo? = null
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -248,6 +258,71 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(connectionTestResult = "❌ 优化失败: ${e.message}")
+            }
+        }
+    }
+
+    fun checkForUpdate() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isCheckingUpdate = true, updateCheckResult = null)
+            try {
+                val checker = UpdateChecker(getApplication())
+                val currentVer = "1.1.0"
+                val info = withContext(Dispatchers.IO) { checker.checkForUpdate(currentVer) }
+                if (info.hasUpdate) {
+                    _uiState.value = _uiState.value.copy(
+                        isCheckingUpdate = false,
+                        updateCheckResult = "发现新版本 ${info.latestVersion}",
+                        pendingUpdate = info
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        isCheckingUpdate = false,
+                        updateCheckResult = "✓ 已是最新版本（${info.latestVersion.ifBlank { currentVer }}）"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isCheckingUpdate = false,
+                    updateCheckResult = "❌ 检查失败: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun dismissUpdate() {
+        _uiState.value = _uiState.value.copy(pendingUpdate = null)
+    }
+
+    fun downloadUpdate(info: UpdateChecker.UpdateInfo) {
+        _uiState.value = _uiState.value.copy(pendingUpdate = null)
+        viewModelScope.launch {
+            try {
+                val checker = UpdateChecker(getApplication())
+                val fileName = "WordMemo-${info.latestVersion}.apk"
+                val downloadId = checker.downloadApk(info.downloadUrl, fileName)
+                _uiState.value = _uiState.value.copy(updateCheckResult = "⏳ 开始下载 ${info.latestVersion}...")
+
+                val app = getApplication<android.app.Application>()
+                val receiver = object : BroadcastReceiver() {
+                    override fun onReceive(ctx: Context, intent: Intent) {
+                        val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+                        if (id == downloadId) {
+                            _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 下载完成，正在安装...")
+                            val apkFile = File(
+                                android.os.Environment.getExternalStoragePublicDirectory(
+                                    android.os.Environment.DIRECTORY_DOWNLOADS
+                                ),
+                                fileName
+                            )
+                            if (apkFile.exists()) checker.installApk(apkFile)
+                            app.unregisterReceiver(this)
+                        }
+                    }
+                }
+                app.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(updateCheckResult = "❌ 下载失败: ${e.message}")
             }
         }
     }

@@ -1,5 +1,11 @@
 package com.wordmemo.app.ui.screen.settings
 
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -12,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -22,6 +29,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.wordmemo.app.ui.theme.OfflineGray
+import kotlinx.coroutines.launch
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -213,6 +222,63 @@ fun SettingsScreen(
 
             if (uiState.exportResult != null) {
                 Text(uiState.exportResult!!, fontSize = 14.sp)
+            }
+
+            Divider(Modifier.padding(vertical = 8.dp))
+            Text("版本更新", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Text(
+                text = "当前版本: v1.1.0",
+                color = Color.Gray,
+                fontSize = 14.sp
+            )
+            Button(
+                onClick = { viewModel.checkForUpdate() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !uiState.isCheckingUpdate
+            ) {
+                if (uiState.isCheckingUpdate) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (uiState.isCheckingUpdate) "检查中..." else "检查更新")
+            }
+
+            if (uiState.updateCheckResult != null) {
+                Text(
+                    text = uiState.updateCheckResult!!,
+                    color = Color(0xFF43A047),
+                    fontSize = 14.sp
+                )
+            }
+
+            // 更新确认对话框
+            val updateInfo = uiState.pendingUpdate
+            if (updateInfo != null) {
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissUpdate() },
+                    title = { Text("发现新版本 ${updateInfo.latestVersion}") },
+                    text = {
+                        Column {
+                            Text(if (updateInfo.releaseNotes.isNotBlank())
+                                updateInfo.releaseNotes.take(300)
+                                else "新版本已发布，是否下载更新？")
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = { viewModel.downloadUpdate(updateInfo) }) {
+                            Text("下载更新")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { viewModel.dismissUpdate() }) {
+                            Text("稍后再说")
+                        }
+                    }
+                )
             }
         }
     }
