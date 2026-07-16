@@ -3,8 +3,11 @@ package com.wordmemo.app.data.network
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.google.gson.Gson
 import com.google.gson.JsonParser
@@ -100,8 +103,28 @@ class UpdateChecker(private val context: Context) {
         return downloadManager.enqueue(request)
     }
 
+    /** 检查是否有安装未知来源 APK 的权限 */
+    fun canInstallPackages(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.packageManager.canRequestPackageInstalls()
+        } else true
+    }
+
+    /** 跳转系统设置开启安装权限 */
+    fun openInstallSettings() {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            Uri.parse("package:${context.packageName}")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }
+
     /** 通过 DownloadManager 查询下载文件 URI 并安装 */
-    fun installDownloadedApk(downloadId: Long) {
+    fun installDownloadedApk(downloadId: Long): String {
+        if (!canInstallPackages()) {
+            openInstallSettings()
+            return "NEED_PERMISSION"
+        }
         try {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val query = DownloadManager.Query().setFilterById(downloadId)
@@ -113,24 +136,24 @@ class UpdateChecker(private val context: Context) {
                     val fileUri = Uri.parse(uriStr)
 
                     if (fileUri.scheme == "file") {
-                        // Android 7+ 禁止 file:// Intent → 走 FileProvider
                         val file = File(fileUri.path ?: "")
-                        if (file.exists()) installApk(file)
+                        if (file.exists()) return installApk(file).let { "OK" }
                     } else {
-                        // content:// URI 可直接 Intent
                         val intent = Intent(Intent.ACTION_VIEW).apply {
                             setDataAndType(fileUri, "application/vnd.android.package-archive")
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         context.startActivity(intent)
+                        return "OK"
                     }
                 }
             }
             cursor.close()
         } catch (e: Exception) {
-            android.util.Log.w("UpdateChecker", "安装失败: ${e.message}")
+            android.util.Log.e("UpdateChecker", "安装异常: ${e.message}", e)
         }
+        return "INSTALL_FAILED"
     }
 
     /** 安装已下载的 APK（回退方案：FileProvider） */

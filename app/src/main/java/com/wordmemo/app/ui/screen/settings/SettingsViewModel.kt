@@ -310,10 +310,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         if (id == downloadId) {
                             _uiState.value = _uiState.value.copy(updateCheckResult = "✅ 下载完成，正在安装...")
                             app.unregisterReceiver(this)
-                            // 延迟片刻等待 DownloadManager 写盘完成
                             kotlinx.coroutines.MainScope().launch {
                                 kotlinx.coroutines.delay(1000)
-                                checker.installDownloadedApk(downloadId)
+                                val result = checker.installDownloadedApk(downloadId)
+                                if (result == "NEED_PERMISSION") {
+                                    _uiState.value = _uiState.value.copy(
+                                        updateCheckResult = "⚠️ 请在系统弹窗中允许「安装未知来源应用」，然后重新更新"
+                                    )
+                                } else if (result != "OK") {
+                                    _uiState.value = _uiState.value.copy(
+                                        updateCheckResult = "❌ 安装失败，请手动安装: ${info.downloadUrl}"
+                                    )
+                                }
                             }
                         }
                     }
