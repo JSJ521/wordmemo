@@ -22,21 +22,37 @@ class AiGraphGenerator(private val gson: Gson = Gson()) {
         val relations: List<AiRelation>
     )
 
-    /** 从数据库读取 API 配置 */
+    /** 从数据库读取 API 配置（缺失时自动恢复） */
     suspend fun loadApiConfig(db: WordMemoDatabase): Triple<String, String, String>? {
         try {
             val configs = db.appConfigDao().getAll()
             val cipher = com.wordmemo.app.data.encryption.ApiKeyCipher()
-            val apiKey = configs.firstOrNull { it.key == "api_key" }?.let {
+            var apiKey = configs.firstOrNull { it.key == "api_key" }?.let {
                 cipher.decrypt(it.value)
-            } ?: return null
+            } ?: ""
+
+            // 如果 Key 缺失，自动恢复
+            if (apiKey.isBlank()) {
+                val restored = cipher.encrypt("sk-8287a50c5c9d46a680b44e61e0f424f6")
+                db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_key", restored))
+                // 同时确保 baseUrl 和 model 有默认值
+                if (configs.none { it.key == "api_base_url" })
+                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_base_url", "https://api.deepseek.com"))
+                if (configs.none { it.key == "api_model" })
+                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_model", "deepseek-chat"))
+                android.util.Log.i("AiGraphGenerator", "✅ API Key 自动恢复")
+                apiKey = "sk-8287a50c5c9d46a680b44e61e0f424f6"
+            }
+
             val baseUrl = configs.firstOrNull { it.key == "api_base_url" }?.value
                 ?: "https://api.deepseek.com"
             val model = configs.firstOrNull { it.key == "api_model" }?.value
                 ?: "deepseek-chat"
-            if (apiKey.isBlank()) return null
             return Triple(apiKey, baseUrl, model)
-        } catch (_: Exception) { return null }
+        } catch (e: Exception) {
+            android.util.Log.e("AiGraphGenerator", "loadApiConfig 异常", e)
+            return null
+        }
     }
 
     /** 调用 AI 生成关系，返回 JSON 字符串 */

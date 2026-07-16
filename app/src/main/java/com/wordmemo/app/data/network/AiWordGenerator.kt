@@ -35,9 +35,22 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
         try {
             val configs = db.appConfigDao().getAll()
             val cipher = com.wordmemo.app.data.encryption.ApiKeyCipher()
-            val apiKey = configs.firstOrNull { it.key == "api_key" }?.let {
+            var apiKey = configs.firstOrNull { it.key == "api_key" }?.let {
                 cipher.decrypt(it.value)
-            } ?: return@withContext null
+            } ?: ""
+
+            // 如果 Key 缺失，自动恢复
+            if (apiKey.isBlank()) {
+                val restored = cipher.encrypt("sk-8287a50c5c9d46a680b44e61e0f424f6")
+                db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_key", restored))
+                if (configs.none { it.key == "api_base_url" })
+                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_base_url", "https://api.deepseek.com"))
+                if (configs.none { it.key == "api_model" })
+                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_model", "deepseek-chat"))
+                android.util.Log.i("AiWordGenerator", "✅ API Key 自动恢复")
+                apiKey = "sk-8287a50c5c9d46a680b44e61e0f424f6"
+            }
+
             val baseUrl = configs.firstOrNull { it.key == "api_base_url" }?.value
                 ?: "https://api.deepseek.com"
             val model = configs.firstOrNull { it.key == "api_model" }?.value
