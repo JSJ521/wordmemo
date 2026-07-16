@@ -85,24 +85,37 @@ class AiGraphGenerator(private val gson: Gson = Gson()) {
 
         val client = AiApiClient(gson)
         val raw = client.chatCompletion(baseUrl, apiKey, model, prompt, "请生成")
-        return raw?.let { extractJson(it) }
+        val content = raw?.let { extractAiContent(it) }
+        return content?.let { extractJsonArray(it) }
     }
 
-    /** 从 AI 回复中提取 JSON（处理被 markdown 包裹的情况） */
-    private fun extractJson(text: String): String? {
-        // 尝试提取 ```json ... ``` 包裹的内容
-        val codeBlock = Regex("""```(?:json)?\s*([\s\S]*?)```""").find(text)
-        if (codeBlock != null) return codeBlock.groupValues[1].trim()
-        // 直接解析
+    /** 从 AI 回复中提取 content（处理 OpenAI API 包裹格式） */
+    private fun extractAiContent(text: String): String? {
         return try {
-            JsonParser.parseString(text.trim())
-            text.trim()
-        } catch (_: Exception) {
-            // 找第一个 { 到最后一个 }
-            val start = text.indexOf('{')
-            val end = text.lastIndexOf('}')
-            if (start >= 0 && end > start) text.substring(start, end + 1) else null
+            val root = JsonParser.parseString(text).asJsonObject
+            val choices = root.getAsJsonArray("choices") ?: return text
+            val msg = choices.first()?.asJsonObject?.get("message")?.asJsonObject ?: return text
+            msg.get("content")?.asString ?: text
+        } catch (_: Exception) { text }
+    }
+
+    /** 从文本中提取 JSON 数组 */
+    private fun extractJsonArray(text: String): String? {
+        val trimmed = text.trim()
+        val codeBlock = Regex("""```(?:json)?\s*\n?([\s\S]*?)\n?```""").find(trimmed)
+        if (codeBlock != null) {
+            val content = codeBlock.groupValues[1].trim()
+            if (content.startsWith("[") || content.startsWith("{")) return content
         }
+        if (trimmed.startsWith("[")) return trimmed
+        if (trimmed.startsWith("{")) return trimmed
+        val start = trimmed.indexOf('[')
+        val end = trimmed.lastIndexOf(']')
+        if (start >= 0 && end > start) return trimmed.substring(start, end + 1)
+        val startB = trimmed.indexOf('{')
+        val endB = trimmed.lastIndexOf('}')
+        if (startB >= 0 && endB > startB) return trimmed.substring(startB, endB + 1)
+        return null
     }
 
     /** 解析 AI 返回的 JSON 为图谱数据（新版：纯数组格式） */

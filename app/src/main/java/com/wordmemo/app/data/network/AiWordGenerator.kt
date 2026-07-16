@@ -124,10 +124,10 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
   }
 ]
 """.trimIndent()
-    /** 健壮的 JSON 解析：处理 markdown 包裹、多余文字、多种字段命名 */
+    /** 健壮的 JSON 解析 */
     private fun parseWordsRobust(text: String): List<GeneratedWord> {
-        // 1. 提取 JSON 数组（处理 markdown 代码块）
-        val jsonStr = extractJsonArray(text) ?: return emptyList()
+        val content = extractAiContent(text) ?: return emptyList()
+        val jsonStr = extractJsonArray(content) ?: return emptyList()
 
         return try {
             val arr = JsonParser.parseString(jsonStr).asJsonArray
@@ -171,6 +171,16 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
                 }
             } catch (_: Exception) { emptyList() }
         }
+    }
+
+    /** 从 OpenAI 兼容 API 响应中提取 choices[0].message.content */
+    private fun extractAiContent(text: String): String? {
+        return try {
+            val root = JsonParser.parseString(text).asJsonObject
+            val choices = root.getAsJsonArray("choices") ?: return text // 不是 API 包裹格式，直接返回
+            val msg = choices.first()?.asJsonObject?.get("message")?.asJsonObject ?: return text
+            msg.get("content")?.asString ?: text
+        } catch (_: Exception) { text }
     }
 
     /** 从文本中提取 JSON 数组 */
