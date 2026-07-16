@@ -78,8 +78,7 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
                     val fromMap = buildGraphFromMap(word.english, word.chinese)
                     if (fromMap != null) return@withContext fromMap
 
-                    // 2. AI API 生成
-                    var aiSkipped = false
+                    // 2. AI API 生成（不使用随机降级）
                     try {
                         val aiGen = com.wordmemo.app.data.network.AiGraphGenerator()
                         aiGen.setCenterWord(word.english)
@@ -88,15 +87,17 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
                             val json = aiGen.generateRelations(word.english, config.first, config.second, config.third)
                             if (json != null) {
                                 val result = aiGen.parseResult(json)
-                                if (result != null) {
+                                if (result != null && result.relations.size >= 5) {
                                     return@withContext buildGraphFromAi(result, word.english, word.chinese)
                                 }
                             }
                         }
                     } catch (_: Exception) { }
 
-                    // 3. 兜底：从预定义 map 找首字母相近的词
-                    buildGraphFallback(word.english, word.chinese)
+                    // AI不可用或无结果 → 返回空图
+                    MultiLevelGraph(centerWord = word.english, nodes = listOf(
+                        GraphNode(id = "center", label = word.english, chinese = word.chinese, level = 0, type = "center")
+                    ), edges = emptyList())
                 }
 
                 _uiState.value = WordGraphUiState(

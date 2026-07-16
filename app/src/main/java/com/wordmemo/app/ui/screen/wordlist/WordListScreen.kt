@@ -275,7 +275,7 @@ private fun AiVocabSection(
                         Icon(Icons.Default.Refresh, contentDescription = null,
                             modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("随机生成", fontSize = 13.sp)
+                        Text("AI生成", fontSize = 13.sp)
                     }
                 }
             }

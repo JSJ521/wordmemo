@@ -36,9 +36,17 @@ private val typeColors = mapOf(
     "synonym"     to Color(0xFF1565C0), // 同义 → 深蓝
     "antonym"     to Color(0xFFC62828), // 反义 → 深红
     "collocation" to Color(0xFF2E7D32), // 搭配 → 深绿
-    "similar"     to Color(0xFFE65100), // 形近 → 深橙
-    "concept"     to Color(0xFF6A1B9A), // 概念 → 深紫
-    ""            to Color(0xFF424242)  // 默认 → 深灰
+    "similar"     to Color(0xFF6A1B9A), // 形近 → 紫色
+    "concept"     to Color(0xFFE65100)  // 概念 → 橙色
+)
+
+// 关系类型中文标签
+private val typeLabels = mapOf(
+    "synonym" to "近义词",
+    "antonym" to "反义词",
+    "collocation" to "常用搭配",
+    "similar" to "形近词",
+    "concept" to "相关概念"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -321,6 +329,19 @@ private fun DrawScope.drawTextNodes(
                     isAntiAlias = true
                 }
                 drawText(node.chinese, px, py + cnSize + 2f * density, cPaint)
+            }
+
+            // 关系类型标签（极淡小字，在中文字下方）
+            if (node.level > 0 && node.type.isNotBlank()) {
+                val tLabel = typeLabels[node.type] ?: node.type
+                val tPaint = android.graphics.Paint().apply {
+                    textSize = 7.5f * density
+                    this.color = engColor.copy(alpha = 0.55f).toArgb()
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    isAntiAlias = true
+                }
+                val chineseHeight = if (node.chinese.isNotBlank()) cnSize + 2f * density else 0f
+                drawText(tLabel, px, py + chineseHeight + cnSize - 4f * density, tPaint)
             }
 
             // 收藏标记：金色★在英文右上角
