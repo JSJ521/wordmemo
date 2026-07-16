@@ -226,8 +226,12 @@ fun SettingsScreen(
 
             Divider(Modifier.padding(vertical = 8.dp))
             Text("版本更新", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            val displayVer = remember {
+                try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "?"
+                } catch (_: Exception) { "?" }
+            }
             Text(
-                text = "当前版本: v1.1.0",
+                text = "当前版本: v$displayVer",
                 color = Color.Gray,
                 fontSize = 14.sp
             )

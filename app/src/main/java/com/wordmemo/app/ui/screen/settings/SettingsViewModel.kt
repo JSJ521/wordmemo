@@ -261,7 +261,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             _uiState.value = _uiState.value.copy(isCheckingUpdate = true, updateCheckResult = null)
             try {
                 val checker = UpdateChecker(getApplication())
-                val currentVer = "1.1.0"
+                val currentVer = try {
+                    withContext(Dispatchers.IO) {
+                        val pkg = getApplication<android.app.Application>()
+                            .packageManager.getPackageInfo(getApplication<android.app.Application>().packageName, 0)
+                        pkg.versionName ?: "1.0.0"
+                    }
+                } catch (_: Exception) { "1.0.0" }
                 val info = withContext(Dispatchers.IO) { checker.checkForUpdate(currentVer) }
                 if (info.hasUpdate) {
                     _uiState.value = _uiState.value.copy(
