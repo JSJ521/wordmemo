@@ -62,39 +62,42 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
         } catch (_: Exception) { 6 }
     }
 
-    /** 生成行业词汇 */
+    /** 生成行业词汇（带质量过滤 + 自动重试） */
     suspend fun generateVocab(
         apiConfig: AiConfig,
         difficultyLevel: Int,
         count: Int = 8
     ): Result<List<GeneratedWord>> = withContext(Dispatchers.IO) {
-        try {
-            val prompt = buildPrompt(difficultyLevel, count)
-            val client = AiApiClient(gson)
-            val raw = client.chatCompletion(
-                apiConfig.baseUrl, apiConfig.apiKey, apiConfig.model,
-                prompt, "请生成 $count 个单词"
-            ) ?: return@withContext Result.failure(Exception("API 无响应"))
+        for (attempt in 1..2) {
+            try {
+                val prompt = buildPrompt(difficultyLevel, count)
+                val client = AiApiClient(gson)
+                val raw = client.chatCompletion(
+                    apiConfig.baseUrl, apiConfig.apiKey, apiConfig.model,
+                    prompt, "请生成 $count 个单词"
+                ) ?: continue
 
-            android.util.Log.i("AiWordGenerator", "AI 原始响应前200字: ${raw.take(200)}")
+                android.util.Log.i("AiWordGenerator", "尝试 $attempt, 原始响应前200字: ${raw.take(200)}")
 
-            val words = parseWordsRobust(raw)
+                // 先解析对象，失败则兜底字符串
+                val allWords = parseWordsRobust(raw)
+                val fallback = if (allWords.isEmpty()) parseStringArray(raw) else emptyList()
+                val combined = if (allWords.isNotEmpty()) allWords else fallback
 
-            if (words.isEmpty()) {
-                // 兜底：尝试解析为纯字符串数组
-                val fallback = parseStringArray(raw)
-                if (fallback.isNotEmpty()) {
-                    android.util.Log.i("AiWordGenerator", "兜底解析 ${fallback.size} 个字符串词")
-                    return@withContext Result.success(fallback.take(count))
+                // 质量过滤
+                val valid = filterValidWords(combined)
+                android.util.Log.i("AiWordGenerator", "尝试 $attempt: ${combined.size}个原始, ${valid.size}个合格")
+
+                if (valid.size >= 5) {
+                    return@withContext Result.success(valid.take(count))
                 }
-                return@withContext Result.failure(Exception("AI 返回格式异常，请重试\n原始响应: ${raw.take(100)}"))
+                // 合格词太少 → 重试
+                android.util.Log.w("AiWordGenerator", "合格词不足 ${valid.size}/$count, 重试...")
+            } catch (e: Exception) {
+                android.util.Log.e("AiWordGenerator", "尝试 $attempt 失败", e)
             }
-            android.util.Log.i("AiWordGenerator", "生成 ${words.size} 个单词: ${words.joinToString { it.english }}")
-            Result.success(words.take(count))
-        } catch (e: Exception) {
-            android.util.Log.e("AiWordGenerator", "生成失败", e)
-            Result.failure(e)
         }
+        Result.failure(Exception("AI 生成失败，请重试"))
     }
 
     private fun buildPrompt(level: Int, count: Int): String = """
@@ -225,10 +228,37 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
             }
             return words.map { GeneratedWord(it, "", "", "", "", "") }
         } catch (_: Exception) {
-            // 尝试逗号分隔
             val cleaned = content.trim().removeSurrounding("[", "]").removeSurrounding("\"")
             val parts = cleaned.split(",").map { it.trim().removeSurrounding("\"") }.filter { it.isNotBlank() }
             return parts.map { GeneratedWord(it, "", "", "", "", "") }
+        }
+    }
+
+    /** 质量过滤器：只保留看起来像真实英语词汇的词 */
+    private fun filterValidWords(words: List<GeneratedWord>): List<GeneratedWord> {
+        val commonLower = setOf("a", "an", "the", "in", "on", "at", "of", "to", "for", "with",
+            "and", "or", "but", "not", "by", "from", "as", "is", "it", "be", "are", "was", "were")
+        val garbage = setOf("json", "array", "output", "format", "```", "english", "chinese",
+            "please", "generate", "vocabulary", "example", "phonetic", "collocations",
+            "系统", "用户", "assistant", "你是一位", "你的任务", "输出格式")
+
+        return words.filter { w ->
+            val eng = w.english.trim()
+            if (eng.length < 2 || eng.length > 60) return@filter false
+            if (eng.all { it.isDigit() || it == '.' || it == '-' }) return@filter false
+            // 含代码或中文特征 → 过滤
+            for (c in eng) {
+                if (c in "{}<>;\\`=") return@filter false
+                if (c.code in 0x4E00..0x9FFF) return@filter false
+            }
+            // 必须至少有一个英文字母
+            if (eng.none { it.isLetter() && it.isLowerCase() || it.isLetter() && it.isUpperCase() }) return@filter false
+            // 排除提示词/代码片段
+            val lower = eng.lowercase()
+            if (garbage.any { lower.contains(it) }) return@filter false
+            // 以小写开头但不是常见小写词 → 可能不是规范英语
+            if (eng[0].isLowerCase() && eng[0].isLetter() && lower !in commonLower) return@filter false
+            true
         }
     }
 }
