@@ -79,6 +79,7 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
                     if (fromMap != null) return@withContext fromMap
 
                     // 2. AI API 生成
+                    var aiSkipped = false
                     try {
                         val aiGen = com.wordmemo.app.data.network.AiGraphGenerator()
                         aiGen.setCenterWord(word.english)

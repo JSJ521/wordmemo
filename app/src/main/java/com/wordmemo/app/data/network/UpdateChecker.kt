@@ -32,21 +32,13 @@ class UpdateChecker(private val context: Context) {
         val releaseUrl: String = ""
     )
 
-    /** 检查最新版本 */
+    /** 检查最新版本（带自动重试） */
     suspend fun checkForUpdate(currentVersion: String): UpdateInfo {
         return withContext(Dispatchers.IO) {
             try {
                 val url = "https://api.github.com/repos/$owner/$repo/releases/latest"
-                val response = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-                    .newCall(okhttp3.Request.Builder().url(url).build())
-                    .execute()
-
-                if (!response.isSuccessful) return@withContext UpdateInfo(false)
-
-                val body = response.body?.string() ?: return@withContext UpdateInfo(false)
+                val body = fetchWithRetry(url, 2)
+                    ?: return@withContext UpdateInfo(false)
                 val root = JsonParser.parseString(body).asJsonObject
 
                 val tagName = root.get("tag_name")?.asString ?: ""
@@ -100,8 +92,8 @@ class UpdateChecker(private val context: Context) {
         return withContext(Dispatchers.IO) {
             try {
                 val client = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
 
                 val request = okhttp3.Request.Builder().url(downloadUrl).build()
@@ -173,5 +165,30 @@ class UpdateChecker(private val context: Context) {
             if (a != b) return a - b
         }
         return 0
+    }
+
+    /** 带重试的 HTTP GET，超时逐次增加 */
+    private fun fetchWithRetry(url: String, maxRetries: Int): String? {
+        for (attempt in 1..maxRetries) {
+            try {
+                val timeout = 15L * attempt
+                val response = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(timeout, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(timeout, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                    .newCall(okhttp3.Request.Builder().url(url).build())
+                    .execute()
+                if (response.isSuccessful) {
+                    return response.body?.string()
+                }
+                android.util.Log.w("UpdateChecker", "尝试 $attempt/$maxRetries HTTP ${response.code}")
+            } catch (e: Exception) {
+                android.util.Log.w("UpdateChecker", "尝试 $attempt/$maxRetries 失败: ${e.message}")
+            }
+            if (attempt < maxRetries) {
+                Thread.sleep(2000L * attempt) // 退避等待
+            }
+        }
+        return null
     }
 }

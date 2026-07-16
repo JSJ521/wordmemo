@@ -103,7 +103,7 @@ class WordListViewModel @Inject constructor(
                 // 1. 读取 API 配置
                 val config = generator.loadApiConfig(db)
                 if (config == null) {
-                    _uiState.update { it.copy(isGeneratingAi = false, aiGenerationResult = "⚠️ 请先在设置页配置 API Key") }
+                    _uiState.update { it.copy(isGeneratingAi = false, aiGenerationResult = "⚠️ API Key 丢失，请在设置页重新保存后重试") }
                     return@launch
                 }
 
