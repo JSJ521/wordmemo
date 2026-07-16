@@ -64,7 +64,7 @@ class AiApiClient @Inject constructor(
         val model: String,
         val messages: List<Message>,
         val temperature: Double = 0.7,
-        @SerializedName("max_tokens") val maxTokens: Int = 1000
+        @SerializedName("max_tokens") val maxTokens: Int = 2000
     )
     private data class Message(val role: String, val content: String)
 }
