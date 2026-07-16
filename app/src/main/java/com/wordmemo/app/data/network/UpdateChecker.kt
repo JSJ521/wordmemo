@@ -120,12 +120,21 @@ class UpdateChecker(private val context: Context) {
     }
 
     /** 通过 DownloadManager 查询下载文件 URI 并安装 */
-    fun installDownloadedApk(downloadId: Long): String {
+    fun installDownloadedApk(downloadId: Long, fileName: String): String {
         if (!canInstallPackages()) {
             openInstallSettings()
             return "NEED_PERMISSION"
         }
         try {
+            // 我们自己知道文件在哪（setDestinationUri 时指定的路径），不用查 DownloadManager
+            val destDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: context.cacheDir
+            val apkFile = File(destDir, fileName)
+            if (apkFile.exists()) {
+                installApk(apkFile)
+                return "OK"
+            }
+            // 文件不在预期位置？回退到 DownloadManager 查询
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val query = DownloadManager.Query().setFilterById(downloadId)
             val cursor = dm.query(query)
@@ -134,18 +143,9 @@ class UpdateChecker(private val context: Context) {
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
                     val uriStr = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))
                     val fileUri = Uri.parse(uriStr)
-
                     if (fileUri.scheme == "file") {
-                        val file = File(fileUri.path ?: "")
-                        if (file.exists()) return installApk(file).let { "OK" }
-                    } else {
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(fileUri, "application/vnd.android.package-archive")
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        context.startActivity(intent)
-                        return "OK"
+                        val f = File(fileUri.path ?: "")
+                        if (f.exists()) { installApk(f); return "OK" }
                     }
                 }
             }

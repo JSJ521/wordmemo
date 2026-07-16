@@ -312,7 +312,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                             app.unregisterReceiver(this)
                             kotlinx.coroutines.MainScope().launch {
                                 kotlinx.coroutines.delay(1000)
-                                val result = checker.installDownloadedApk(downloadId)
+                                val result = checker.installDownloadedApk(downloadId, fileName)
                                 if (result == "NEED_PERMISSION") {
                                     _uiState.value = _uiState.value.copy(
                                         updateCheckResult = "⚠️ 请在系统弹窗中允许「安装未知来源应用」，然后重新更新"
