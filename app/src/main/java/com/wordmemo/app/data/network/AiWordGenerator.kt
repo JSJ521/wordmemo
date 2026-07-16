@@ -76,11 +76,12 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
                 prompt, "请生成 $count 个单词"
             ) ?: return@withContext Result.failure(Exception("API 无响应"))
 
-            val json = extractJson(raw)
-            val words = parseWords(json ?: raw)
+            android.util.Log.i("AiWordGenerator", "AI 原始响应前200字: ${raw.take(200)}")
+
+            val words = parseWordsRobust(raw)
 
             if (words.isEmpty()) {
-                return@withContext Result.failure(Exception("AI 返回格式异常，请重试"))
+                return@withContext Result.failure(Exception("AI 返回格式异常，请重试\n原始响应: ${raw.take(100)}"))
             }
             android.util.Log.i("AiWordGenerator", "生成 ${words.size} 个单词: ${words.joinToString { it.english }}")
             Result.success(words.take(count))
@@ -123,35 +124,75 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
   }
 ]
 """.trimIndent()
+    /** 健壮的 JSON 解析：处理 markdown 包裹、多余文字、多种字段命名 */
+    private fun parseWordsRobust(text: String): List<GeneratedWord> {
+        // 1. 提取 JSON 数组（处理 markdown 代码块）
+        val jsonStr = extractJsonArray(text) ?: return emptyList()
 
-    private fun extractJson(text: String): String? {
-        val codeBlock = Regex("""```(?:json)?\s*([\s\S]*?)```""").find(text)
-        if (codeBlock != null) return codeBlock.groupValues[1].trim()
         return try {
-            JsonParser.parseString(text.trim())
-            text.trim()
+            val arr = JsonParser.parseString(jsonStr).asJsonArray
+            arr.mapNotNull { el ->
+                try {
+                    val obj = el.asJsonObject
+                    // 兼容多种字段命名：english/word/name，chinese/meaning/translation
+                    val eng = obj.get("english")?.asString
+                        ?: obj.get("word")?.asString
+                        ?: obj.get("name")?.asString
+                        ?: return@mapNotNull null
+                    val chi = obj.get("chinese")?.asString
+                        ?: obj.get("meaning")?.asString
+                        ?: obj.get("translation")?.asString ?: ""
+                    val phone = obj.get("phonetic")?.asString
+                        ?: obj.get("pronunciation")?.asString ?: ""
+                    val ex = obj.get("example")?.asString ?: ""
+                    val exCn = obj.get("example_chinese")?.asString
+                        ?: obj.get("example_cn")?.asString ?: ""
+                    val coll = obj.get("collocations")?.asString
+                        ?: obj.get("collocation")?.asString ?: ""
+                    GeneratedWord(eng, chi, phone, ex, exCn, coll)
+                } catch (_: Exception) { null }
+            }
         } catch (_: Exception) {
-            val start = text.indexOf('[')
-            val end = text.lastIndexOf(']')
-            if (start >= 0 && end > start) text.substring(start, end + 1) else null
+            // 2. 可能是单层 JSON 对象包在数组外
+            try {
+                val obj = JsonParser.parseString(jsonStr).asJsonObject
+                val arr2 = obj.getAsJsonArray("words") ?: obj.getAsJsonArray("data")
+                    ?: obj.getAsJsonArray("result") ?: return emptyList()
+                arr2.mapNotNull { el ->
+                    val o = el.asJsonObject
+                    GeneratedWord(
+                        o.get("english")?.asString ?: o.get("word")?.asString ?: return@mapNotNull null,
+                        o.get("chinese")?.asString ?: o.get("meaning")?.asString ?: "",
+                        o.get("phonetic")?.asString ?: "",
+                        o.get("example")?.asString ?: "",
+                        o.get("example_chinese")?.asString ?: "",
+                        o.get("collocations")?.asString ?: ""
+                    )
+                }
+            } catch (_: Exception) { emptyList() }
         }
     }
 
-    private fun parseWords(json: String): List<GeneratedWord> {
-        return try {
-            val arr = JsonParser.parseString(json).asJsonArray
-            arr.mapNotNull { el ->
-                val obj = el.asJsonObject
-                val eng = obj.get("english")?.asString ?: return@mapNotNull null
-                GeneratedWord(
-                    english = eng,
-                    chinese = obj.get("chinese")?.asString ?: "",
-                    phonetic = obj.get("phonetic")?.asString ?: "",
-                    example = obj.get("example")?.asString ?: "",
-                    exampleChinese = obj.get("example_chinese")?.asString ?: "",
-                    collocations = obj.get("collocations")?.asString ?: ""
-                )
-            }
-        } catch (_: Exception) { emptyList() }
+    /** 从文本中提取 JSON 数组 */
+    private fun extractJsonArray(text: String): String? {
+        val trimmed = text.trim()
+        // 尝试匹配 ```json ... ```
+        val codeBlock = Regex("""```(?:json)?\s*\n?([\s\S]*?)\n?```""").find(trimmed)
+        if (codeBlock != null) {
+            val content = codeBlock.groupValues[1].trim()
+            if (content.startsWith("[") || content.startsWith("{")) return content
+        }
+        // 尝试直接解析
+        if (trimmed.startsWith("[")) return trimmed
+        if (trimmed.startsWith("{")) return trimmed
+        // 找第一个 [ 到最后一个 ]
+        val start = trimmed.indexOf('[')
+        val end = trimmed.lastIndexOf(']')
+        if (start >= 0 && end > start) return trimmed.substring(start, end + 1)
+        // 找第一个 { 到最后一个 }
+        val startB = trimmed.indexOf('{')
+        val endB = trimmed.lastIndexOf('}')
+        if (startB >= 0 && endB > startB) return trimmed.substring(startB, endB + 1)
+        return null
     }
 }
