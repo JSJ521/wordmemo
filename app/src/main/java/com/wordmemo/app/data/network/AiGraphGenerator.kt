@@ -31,17 +31,24 @@ class AiGraphGenerator(private val gson: Gson = Gson()) {
                 cipher.decrypt(it.value)
             } ?: ""
 
-            // 如果 Key 缺失，自动恢复
+            // 如果 Key 缺失，自动恢复（加密失败时降级为明文）
             if (apiKey.isBlank()) {
-                val restored = cipher.encrypt("sk-8287a50c5c9d46a680b44e61e0f424f6")
-                db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_key", restored))
+                try {
+                    val restored = cipher.encrypt("sk-8287a50c5c9d46a680b44e61e0f424f6")
+                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_key", restored))
+                    android.util.Log.i("AiGraphGenerator", "✅ API Key 自动恢复（加密存储）")
+                    apiKey = "sk-8287a50c5c9d46a680b44e61e0f424f6"
+                } catch (_: Exception) {
+                    // 加密失败，直接存明文（decrypt 会处理）
+                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_key", "sk-8287a50c5c9d46a680b44e61e0f424f6"))
+                    android.util.Log.w("AiGraphGenerator", "⚠️ API Key 明文存储（加密不可用）")
+                    apiKey = "sk-8287a50c5c9d46a680b44e61e0f424f6"
+                }
                 // 同时确保 baseUrl 和 model 有默认值
                 if (configs.none { it.key == "api_base_url" })
                     db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_base_url", "https://api.deepseek.com"))
                 if (configs.none { it.key == "api_model" })
                     db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_model", "deepseek-chat"))
-                android.util.Log.i("AiGraphGenerator", "✅ API Key 自动恢复")
-                apiKey = "sk-8287a50c5c9d46a680b44e61e0f424f6"
             }
 
             val baseUrl = configs.firstOrNull { it.key == "api_base_url" }?.value
