@@ -135,32 +135,6 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
         return buildGraphFromRelations(centerWord, chinese, l1)
     }
 
-    /** 策略3: 兜底 — 从预定义 word 库按首字母相近的选 */
-    private fun buildGraphFallback(centerWord: String, chinese: String): MultiLevelGraph {
-        val seed = centerWord.lowercase().hashCode().toLong()
-        val rng = java.util.Random(seed)
-        val avail = chineseMap.keys
-            .filter { it != centerWord.lowercase() }
-            .sortedBy { if (it.firstOrNull() == centerWord.lowercase().firstOrNull()) 0 else 1 }
-            .toMutableList()
-
-        val typeCycle = listOf("synonym", "antonym", "collocation", "similar", "concept", "synonym", "antonym")
-        val l1 = (0 until 7).mapNotNull { branch ->
-            if (avail.isEmpty()) return@mapNotNull null
-            val idx = (rng.nextInt() and Int.MAX_VALUE) % avail.size
-            val w1 = avail.removeAt(idx)
-            val c1 = chineseMap[w1] ?: w1
-            val l2 = (0 until 2).mapNotNull {
-                if (avail.isEmpty()) return@mapNotNull null
-                val ci = (rng.nextInt() and Int.MAX_VALUE) % avail.size
-                val w2 = avail.removeAt(ci)
-                RelWord(w2, chineseMap[w2] ?: w2, typeCycle[(branch + it + 1) % typeCycle.size])
-            }
-            WordRel(w1, c1, l2)
-        }
-        return buildGraphFromRelations(centerWord, chinese, l1)
-    }
-
     /** 通用：从关系列表构建 MultiLevelGraph */
     private fun buildGraphFromRelations(centerWord: String, chinese: String, relations: List<WordRel>): MultiLevelGraph {
         val allNodes = mutableListOf<GraphNode>()
