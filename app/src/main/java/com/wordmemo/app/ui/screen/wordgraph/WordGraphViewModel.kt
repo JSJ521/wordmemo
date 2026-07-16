@@ -49,6 +49,8 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
     private val _uiState = MutableStateFlow(WordGraphUiState())
     val uiState: StateFlow<WordGraphUiState> = _uiState.asStateFlow()
 
+    private var centerWordForRelations: String = ""
+
     fun loadWord(wordId: Long) {
         viewModelScope.launch {
             _uiState.value = WordGraphUiState(isLoading = true)
@@ -69,10 +71,30 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
                     note = entity.note, createdAt = entity.createdAt,
                     updatedAt = entity.updatedAt
                 )
+                centerWordForRelations = word.english.lowercase()
 
-                // 以数据库中真实单词为中心，动态生成关系图谱
                 val graph = withContext(Dispatchers.Default) {
-                    buildGraph(word.english, word.chinese)
+                    // 1. 预定义关系（最精确）
+                    val fromMap = buildGraphFromMap(word.english, word.chinese)
+                    if (fromMap != null) return@withContext fromMap
+
+                    // 2. AI API 生成
+                    try {
+                        val aiGen = com.wordmemo.app.data.network.AiGraphGenerator()
+                        val config = aiGen.loadApiConfig(db)
+                        if (config != null) {
+                            val json = aiGen.generateRelations(word.english, config.first, config.second, config.third)
+                            if (json != null) {
+                                val result = aiGen.parseResult(json)
+                                if (result != null) {
+                                    return@withContext buildGraphFromAi(result, word.english, word.chinese)
+                                }
+                            }
+                        }
+                    } catch (_: Exception) { }
+
+                    // 3. 兜底：从预定义 map 找首字母相近的词
+                    buildGraphFallback(word.english, word.chinese)
                 }
 
                 _uiState.value = WordGraphUiState(
@@ -90,78 +112,73 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    // ─── 动态图谱生成：以任意中心词生成1+7+14径向树 ───
+    // ─── 动态图谱生成：三种策略 ───
 
-    private fun buildGraph(centerWord: String, chinese: String): MultiLevelGraph {
-        val allNodes = mutableListOf<GraphNode>()
-        val allEdges = mutableListOf<GraphEdge>()
-
-        // 中心节点
-        allNodes.add(GraphNode(
-            id = "center", label = centerWord, chinese = chinese,
-            level = 0, type = "center"
-        ))
-
-        // 查找中心词的语义关系
+    /** 策略1: 预定义关系 map（最精确） */
+    private fun buildGraphFromMap(centerWord: String, chinese: String): MultiLevelGraph? {
         val key = centerWord.lowercase()
-        val relations = relationMap[key] ?: buildFallbackRelations(centerWord)
-
-        val typeCycle = listOf("synonym", "antonym", "collocation", "similar", "concept",
-                               "synonym", "antonym")
-
-        for ((branch, rel) in relations.l1.take(7).withIndex()) {
-            val l1Id = "l1_$branch"
-            val type = typeCycle[branch % typeCycle.size]
-            allNodes.add(GraphNode(
-                id = l1Id, label = rel.word, chinese = rel.chinese,
-                level = 1, type = type, branchIndex = branch
-            ))
-            allEdges.add(GraphEdge(from = "center", to = l1Id, label = type))
-
-            // L2：每个L1的2个关联词
-            val l2s = rel.l2.take(2)
-            for ((ci, child) in l2s.withIndex()) {
-                val l2Id = "l2_${branch}_$ci"
-                val childType = typeCycle[(branch + ci + 1) % typeCycle.size]
-                allNodes.add(GraphNode(
-                    id = l2Id, label = child.word, chinese = child.chinese,
-                    level = 2, type = childType, parentId = l1Id,
-                    branchIndex = branch
-                ))
-                allEdges.add(GraphEdge(from = l1Id, to = l2Id, label = childType))
-            }
-        }
-
-        return MultiLevelGraph(centerWord = centerWord, nodes = allNodes, edges = allEdges)
+        val relations = relationMap[key] ?: return null
+        return buildGraphFromRelations(centerWord, chinese, relations.l1)
     }
 
-    /** 为未收录的中心词回退：从 chineseMap 按 seed 选真实单词 */
-    private fun buildFallbackRelations(centerWord: String): WordRelations {
+    /** 策略2: AI API 生成的关系 */
+    private fun buildGraphFromAi(result: com.wordmemo.app.data.network.AiGraphGenerator.AiGraphResult, centerWord: String, chinese: String): MultiLevelGraph {
+        val l1 = result.relations.map { rel ->
+            val l2 = rel.children.map { child ->
+                RelWord(child.word, child.chinese, child.type)
+            }
+            WordRel(rel.word, rel.chinese, l2)
+        }
+        return buildGraphFromRelations(centerWord, chinese, l1)
+    }
+
+    /** 策略3: 兜底 — 从预定义 word 库按首字母相近的选 */
+    private fun buildGraphFallback(centerWord: String, chinese: String): MultiLevelGraph {
         val seed = centerWord.lowercase().hashCode().toLong()
         val rng = java.util.Random(seed)
-        val avail = chineseMap.keys.filter { it != centerWord.lowercase() }.toMutableList()
+        val avail = chineseMap.keys
+            .filter { it != centerWord.lowercase() }
+            .sortedBy { if (it.firstOrNull() == centerWord.lowercase().firstOrNull()) 0 else 1 }
+            .toMutableList()
 
-        val typeLabels = listOf("同义", "反义", "搭配", "形近", "概念", "同义", "反义")
         val typeCycle = listOf("synonym", "antonym", "collocation", "similar", "concept", "synonym", "antonym")
-
-        val l1 = (0 until 7).map { branch ->
-            if (avail.isEmpty()) return@map WordRel("_", "", emptyList())
+        val l1 = (0 until 7).mapNotNull { branch ->
+            if (avail.isEmpty()) return@mapNotNull null
             val idx = (rng.nextInt() and Int.MAX_VALUE) % avail.size
             val w1 = avail.removeAt(idx)
             val c1 = chineseMap[w1] ?: w1
-
-            val l2 = (0 until 2).map {
-                if (avail.isEmpty()) return@map RelWord("_", "", "")
+            val l2 = (0 until 2).mapNotNull {
+                if (avail.isEmpty()) return@mapNotNull null
                 val ci = (rng.nextInt() and Int.MAX_VALUE) % avail.size
                 val w2 = avail.removeAt(ci)
-                val c2 = chineseMap[w2] ?: w2
-                RelWord(w2, c2, typeCycle[(branch + it + 1) % typeCycle.size])
+                RelWord(w2, chineseMap[w2] ?: w2, typeCycle[(branch + it + 1) % typeCycle.size])
             }
-
             WordRel(w1, c1, l2)
-        }.filter { it.word != "_" }
+        }
+        return buildGraphFromRelations(centerWord, chinese, l1)
+    }
 
-        return WordRelations(if (l1.isEmpty()) listOf(WordRel(centerWord, lookupChinese(centerWord))) else l1)
+    /** 通用：从关系列表构建 MultiLevelGraph */
+    private fun buildGraphFromRelations(centerWord: String, chinese: String, relations: List<WordRel>): MultiLevelGraph {
+        val allNodes = mutableListOf<GraphNode>()
+        val allEdges = mutableListOf<GraphEdge>()
+        val typeCycle = listOf("synonym", "antonym", "collocation", "similar", "concept", "synonym", "antonym")
+
+        allNodes.add(GraphNode(id = "center", label = centerWord, chinese = chinese, level = 0, type = "center"))
+
+        for ((branch, rel) in relations.take(7).withIndex()) {
+            val l1Id = "l1_$branch"
+            val type = typeCycle[branch % typeCycle.size]
+            allNodes.add(GraphNode(id = l1Id, label = rel.word, chinese = rel.chinese, level = 1, type = type, branchIndex = branch))
+            allEdges.add(GraphEdge(from = "center", to = l1Id, label = type))
+            for ((ci, child) in rel.l2.take(2).withIndex()) {
+                val l2Id = "l2_${branch}_$ci"
+                val childType = typeCycle[(branch + ci + 1) % typeCycle.size]
+                allNodes.add(GraphNode(id = l2Id, label = child.word, chinese = child.chinese, level = 2, type = childType, parentId = l1Id, branchIndex = branch))
+                allEdges.add(GraphEdge(from = l1Id, to = l2Id, label = childType))
+            }
+        }
+        return MultiLevelGraph(centerWord = centerWord, nodes = allNodes, edges = allEdges)
     }
 
     private fun lookupChinese(word: String): String {
