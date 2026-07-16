@@ -85,6 +85,15 @@ fun WordListScreen(
                 onQueryChange = { viewModel.onSearchQueryChanged(it) }
             )
 
+            // AI 行业词汇生成
+            AiVocabSection(
+                isGenerating = uiState.isGeneratingAi,
+                generatedWords = uiState.aiGeneratedWords,
+                resultMessage = uiState.aiGenerationResult,
+                onGenerate = { viewModel.generateAiVocab() },
+                onDismissResult = { viewModel.dismissAiResult() }
+            )
+
             // 筛选栏：全部 / 已掌握
             Row(
                 modifier = Modifier
@@ -220,6 +229,76 @@ private fun WordItem(
                     color = Color.Gray,
                     fontSize = 14.sp
                 )
+                }
+            }
+        }
+    }
+}
+
+/** AI 行业词汇生成卡片 */
+@Composable
+private fun AiVocabSection(
+    isGenerating: Boolean,
+    generatedWords: List<com.wordmemo.app.data.network.AiWordGenerator.GeneratedWord>,
+    resultMessage: String?,
+    onGenerate: () -> Unit,
+    onDismissResult: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F8FF)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AutoAwesome, contentDescription = null,
+                    tint = Color(0xFF1565C0), modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("海外 EPC 项目词汇", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = onGenerate,
+                    enabled = !isGenerating,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+                ) {
+                    if (isGenerating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("生成中...", fontSize = 13.sp)
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = null,
+                            modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("生成 8 个", fontSize = 13.sp)
+                    }
+                }
+            }
+
+            if (resultMessage != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(resultMessage, fontSize = 13.sp,
+                    color = if (resultMessage.startsWith("✅")) Color(0xFF2E7D32)
+                    else Color(0xFFC62828))
+            }
+
+            if (generatedWords.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("本次生成:", fontSize = 12.sp, color = Color.Gray)
+                Spacer(Modifier.height(4.dp))
+                generatedWords.forEach { w ->
+                    Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                        Text("▸ ", fontSize = 13.sp, color = Color(0xFF1565C0))
+                        Text(w.english, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        if (w.chinese.isNotBlank()) {
+                            Text(" — ${w.chinese}", fontSize = 12.sp, color = Color.Gray)
+                        }
+                    }
                 }
             }
         }

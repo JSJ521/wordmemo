@@ -49,26 +49,39 @@ class AiGraphGenerator(private val gson: Gson = Gson()) {
         val prompt = """你是一位英语词汇专家。请为单词 "$centerWord" 生成 7 个直接相关的 L1 关联词。
 
 要求：
-- 每个 L1 词必须是与中心词有真实语义关联的**真实英语单词**（同义词、反义词、常用搭配、形近词、相关概念）
-- 每个 L1 词附带 2 个 L2 子关联词（与 L1 有直接关系）
+- 每个 L1 词必须是与中心词有**真实可解释**的语义关系
+- 关系必须具体说明，不能泛泛而谈
+- 每个 L1 附带 2 个 L2 子关联词（与 L1 有直接关系）
 - 所有词必须附带中文释义
 - 关系类型：synonym（同义词）、antonym（反义词）、collocation（搭配）、similar（形近词）、concept（相关概念）
 
-输出格式（仅 JSON，不要其他文字）：
-{
-  "center": "$centerWord",
-  "relations": [
-    {
-      "word": "l1_word_1",
-      "chinese": "中文释义",
-      "type": "synonym",
-      "children": [
-        {"word": "l2_word_1a", "chinese": "中文释义", "type": "similar"},
-        {"word": "l2_word_1b", "chinese": "中文释义", "type": "antonym"}
-      ]
-    }
-  ]
-}"""
+示例——中心词 "abandon"：
+[
+  {"word":"desert","chinese":"抛弃","type":"synonym","children":[
+    {"word":"forsake","chinese":"遗弃","type":"synonym"},
+    {"word":"retain","chinese":"保留","type":"antonym"}]},
+  {"word":"keep","chinese":"保留","type":"antonym","children":[
+    {"word":"maintain","chinese":"维持","type":"synonym"},
+    {"word":"discard","chinese":"丢弃","type":"antonym"}]},
+  {"word":"give up","chinese":"放弃","type":"collocation","children":[
+    {"word":"surrender","chinese":"投降","type":"synonym"},
+    {"word":"persist","chinese":"坚持","type":"antonym"}]},
+  {"word":"abolish","chinese":"废除","type":"similar","children":[
+    {"word":"eliminate","chinese":"消除","type":"synonym"},
+    {"word":"establish","chinese":"建立","type":"antonym"}]},
+  {"word":"leave","chinese":"离开","type":"concept","children":[
+    {"word":"depart","chinese":"出发","type":"synonym"},
+    {"word":"arrive","chinese":"到达","type":"antonym"}]},
+  {"word":"quit","chinese":"退出","type":"synonym","children":[
+    {"word":"resign","chinese":"辞职","type":"synonym"},
+    {"word":"continue","chinese":"继续","type":"antonym"}]},
+  {"word":"adopt","chinese":"采纳","type":"antonym","children":[
+    {"word":"embrace","chinese":"拥抱","type":"synonym"},
+    {"word":"reject","chinese":"拒绝","type":"antonym"}]}
+]
+
+请按相同格式为 "$centerWord" 生成 7 组关系。
+输出仅 JSON 数组，不要其他文字："""
 
         val client = AiApiClient(gson)
         val raw = client.chatCompletion(baseUrl, apiKey, model, prompt, "请生成")
@@ -92,26 +105,30 @@ class AiGraphGenerator(private val gson: Gson = Gson()) {
         }
     }
 
-    /** 解析 AI 返回的 JSON 为图谱数据 */
+    /** 解析 AI 返回的 JSON 为图谱数据（新版：纯数组格式） */
     fun parseResult(json: String): AiGraphResult? {
         return try {
-            val root = JsonParser.parseString(json).asJsonObject
-            val center = root.get("center")?.asString ?: return null
-            val relations = root.getAsJsonArray("relations")?.map { el ->
+            val arr = JsonParser.parseString(json).asJsonArray
+            val relations = arr.mapNotNull { el ->
                 val obj = el.asJsonObject
-                val word = obj.get("word")?.asString ?: return@map null
+                val word = obj.get("word")?.asString ?: return@mapNotNull null
                 val chinese = obj.get("chinese")?.asString ?: ""
                 val type = obj.get("type")?.asString ?: ""
                 val children = obj.getAsJsonArray("children")?.mapNotNull { c ->
                     val co = c.asJsonObject
-                    val cw = co.get("word")?.asString ?: return@mapNotNull null
-                    AiRelation(cw, co.get("chinese")?.asString ?: "", co.get("type")?.asString ?: "")
+                    AiRelation(
+                        co.get("word")?.asString ?: return@mapNotNull null,
+                        co.get("chinese")?.asString ?: "",
+                        co.get("type")?.asString ?: ""
+                    )
                 } ?: emptyList()
                 AiRelation(word, chinese, type, children)
-            }?.filterNotNull() ?: emptyList()
-
-            if (relations.size < 3) return null // 太少了说明 AI 没理解好
-            AiGraphResult(center, relations)
+            }
+            if (relations.size < 3) return null
+            AiGraphResult(centerWordForRelations, relations)
         } catch (_: Exception) { null }
     }
+
+    private var centerWordForRelations: String = ""
+    fun setCenterWord(word: String) { centerWordForRelations = word }
 }

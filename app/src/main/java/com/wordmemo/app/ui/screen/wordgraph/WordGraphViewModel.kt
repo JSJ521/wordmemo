@@ -81,6 +81,7 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
                     // 2. AI API 生成
                     try {
                         val aiGen = com.wordmemo.app.data.network.AiGraphGenerator()
+                        aiGen.setCenterWord(word.english)
                         val config = aiGen.loadApiConfig(db)
                         if (config != null) {
                             val json = aiGen.generateRelations(word.english, config.first, config.second, config.third)
