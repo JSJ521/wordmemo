@@ -81,6 +81,12 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
             val words = parseWordsRobust(raw)
 
             if (words.isEmpty()) {
+                // 兜底：尝试解析为纯字符串数组
+                val fallback = parseStringArray(raw)
+                if (fallback.isNotEmpty()) {
+                    android.util.Log.i("AiWordGenerator", "兜底解析 ${fallback.size} 个字符串词")
+                    return@withContext Result.success(fallback.take(count))
+                }
                 return@withContext Result.failure(Exception("AI 返回格式异常，请重试\n原始响应: ${raw.take(100)}"))
             }
             android.util.Log.i("AiWordGenerator", "生成 ${words.size} 个单词: ${words.joinToString { it.english }}")
@@ -112,17 +118,21 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
 3. 每个词附带真实例句，体现 EPC 场景
 
 【输出格式】
-仅输出 JSON 数组，不要其他文字：
+必须输出 JSON 数组，每项是**对象**（不是字符串）：
+```json
 [
   {
-    "english": "word_or_phrase",
-    "chinese": "精确中文释义（含工程语境说明）",
-    "phonetic": "/音标/",
-    "example": "英文例句（体现 EPC 场景实际用法）",
-    "example_chinese": "例句中文翻译",
-    "collocations": "2-3个常用搭配短语"
+    "english": "Variation Order",
+    "chinese": "变更令（合同金额或工期的变更指令）",
+    "phonetic": "/ˌveəriˈeɪʃən ˈɔːdər/",
+    "example": "The contractor submitted a variation order for the additional PV panels.",
+    "example_chinese": "承包商就额外光伏板提交了变更令。",
+    "collocations": "issue a variation order, approve a variation order, variation order request"
   }
 ]
+```
+
+⚠️ **重要：必须输出对象数组，不是字符串数组。每项必须有 english 字段。不要输出 ["word1","word2"] 这种格式。**
 """.trimIndent()
     /** 健壮的 JSON 解析 */
     private fun parseWordsRobust(text: String): List<GeneratedWord> {
@@ -186,23 +196,39 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
     /** 从文本中提取 JSON 数组 */
     private fun extractJsonArray(text: String): String? {
         val trimmed = text.trim()
-        // 尝试匹配 ```json ... ```
         val codeBlock = Regex("""```(?:json)?\s*\n?([\s\S]*?)\n?```""").find(trimmed)
         if (codeBlock != null) {
             val content = codeBlock.groupValues[1].trim()
             if (content.startsWith("[") || content.startsWith("{")) return content
         }
-        // 尝试直接解析
         if (trimmed.startsWith("[")) return trimmed
         if (trimmed.startsWith("{")) return trimmed
-        // 找第一个 [ 到最后一个 ]
         val start = trimmed.indexOf('[')
         val end = trimmed.lastIndexOf(']')
         if (start >= 0 && end > start) return trimmed.substring(start, end + 1)
-        // 找第一个 { 到最后一个 }
         val startB = trimmed.indexOf('{')
         val endB = trimmed.lastIndexOf('}')
         if (startB >= 0 && endB > startB) return trimmed.substring(startB, endB + 1)
         return null
+    }
+
+    /** 兜底：解析纯字符串数组 ["word1","word2"] */
+    private fun parseStringArray(text: String): List<GeneratedWord> {
+        val content = extractAiContent(text) ?: return emptyList()
+        try {
+            val arr = JsonParser.parseString(content).asJsonArray
+            val words = arr.mapNotNull { el ->
+                try {
+                    val s = el.asString
+                    if (s.isBlank()) null else s
+                } catch (_: Exception) { null }
+            }
+            return words.map { GeneratedWord(it, "", "", "", "", "") }
+        } catch (_: Exception) {
+            // 尝试逗号分隔
+            val cleaned = content.trim().removeSurrounding("[", "]").removeSurrounding("\"")
+            val parts = cleaned.split(",").map { it.trim().removeSurrounding("\"") }.filter { it.isNotBlank() }
+            return parts.map { GeneratedWord(it, "", "", "", "", "") }
+        }
     }
 }
