@@ -167,10 +167,11 @@ class UpdateChecker(private val context: Context) {
     private fun compareVersions(v1: String, v2: String): Int {
         // 处理版本号方案变更：单号版本（如"5"）vs semver（如"7.22.0"）
         // 单号版本是新一代版本号体系，语义上高于所有旧版semver
+        // 旧 semver 至少 2 个点号（7.22.0），新格式 0-1 个点号（5、5.1）
         val dotCount1 = v1.count { it == '.' }
         val dotCount2 = v2.count { it == '.' }
-        if (dotCount1 == 0 && dotCount2 > 0) return 1  // v1是新格式 → 更新
-        if (dotCount1 > 0 && dotCount2 == 0) return -1 // v2是新格式 → 更旧
+        if (dotCount1 <= 1 && dotCount2 >= 2) return 1   // v1是新格式 → 更新
+        if (dotCount1 >= 2 && dotCount2 <= 1) return -1  // v2是新格式 → 更旧
 
         val parts1 = v1.split(".").map { it.toIntOrNull() ?: 0 }
         val parts2 = v2.split(".").map { it.toIntOrNull() ?: 0 }
