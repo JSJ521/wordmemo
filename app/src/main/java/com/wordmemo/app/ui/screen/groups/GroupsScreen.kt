@@ -51,7 +51,7 @@ fun GroupsScreen(
                     .fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text("暂无分组，点击 + 创建", color = Color.Gray)
+                Text("暂无分组，点击 + 创建", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
             }
         } else {
             LazyColumn(
@@ -129,7 +129,7 @@ private fun GroupItem(
                 modifier = Modifier.weight(1f)
             )
             IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "删除", tint = Color.Red.copy(alpha = 0.6f))
+                Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
             }
         }
     }

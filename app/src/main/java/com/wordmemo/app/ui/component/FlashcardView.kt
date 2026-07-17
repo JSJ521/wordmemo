@@ -1,6 +1,6 @@
 package com.wordmemo.app.ui.component
 
-import android.speech.tts.TextToSpeech
+import android.media.MediaPlayer
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -18,12 +18,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.util.Locale
+import java.net.URLEncoder
 import kotlin.math.abs
 
 @Composable
@@ -38,23 +37,20 @@ fun FlashcardView(
     val rotation = remember { Animatable(0f) }
     val target = if (isFlipped) 180f else 0f
 
-    // TextToSpeech：全局初始化一次，设英语为朗读语言
-    val context = LocalContext.current
-    val tts = remember {
-        lateinit var t: TextToSpeech
-        t = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                t.setLanguage(java.util.Locale.US)
-            } else {
-                android.util.Log.w("FlashcardView", "TTS init failed: $status")
+    // 在线 TTS：播放 Google 美式发音
+    fun speakWord(word: String) {
+        try {
+            val encoded = URLEncoder.encode(word, "UTF-8")
+            val url = "https://translate.google.com/translate_tts?ie=UTF-8&q=$encoded&tl=en&client=tw-ob"
+            MediaPlayer().apply {
+                setDataSource(url)
+                setOnPreparedListener { start() }
+                setOnCompletionListener { release() }
+                setOnErrorListener { _, _, _ -> release(); true }
+                prepareAsync()
             }
-        }
-        t
-    }
-    DisposableEffect(Unit) {
-        onDispose {
-            tts.stop()
-            tts.shutdown()
+        } catch (e: Exception) {
+            android.util.Log.e("FlashcardView", "在线发音失败: $word", e)
         }
     }
 
@@ -73,23 +69,21 @@ fun FlashcardView(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .height(320.dp)
+            .defaultMinSize(minHeight = 240.dp)
             .clickable { onFlip() }
             .graphicsLayer {
                 rotationY = rotation.value
                 cameraDistance = 12f * density
             },
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = if (showFront) Color(0xFFE3F2FD) else Color(0xFFF3E5F5))
+        shape = MaterialTheme.shapes.large,
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (showFront) MaterialTheme.colorScheme.primaryContainer 
+                           else MaterialTheme.colorScheme.secondaryContainer
+        )
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    if (showFront) Color(0xFFE3F2FD) else Color(0xFFF3E5F5),
-                    RoundedCornerShape(16.dp)
-                ),
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             // ── 正面 ──
@@ -99,7 +93,6 @@ fun FlashcardView(
                     .padding(24.dp)
                     .alpha(if (showFront) 1f else 0f)
             ) {
-                // 英语单词
                 Text(
                     text = frontText,
                     fontSize = 28.sp,
@@ -108,39 +101,35 @@ fun FlashcardView(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                // 音标（浅灰斜体）
                 if (frontPhonetic.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = frontPhonetic,
-                        fontSize = 16.sp,
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Light,
                         textAlign = TextAlign.Center,
-                        color = Color(0xFF78909C)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
-                // 读音按钮
                 Spacer(Modifier.height(16.dp))
                 FilledTonalIconButton(
-                    onClick = {
-                        tts.speak(frontText, TextToSpeech.QUEUE_FLUSH, null, null)
-                    },
+                    onClick = { speakWord(frontText) },
                     modifier = Modifier.size(48.dp),
                     shape = CircleShape,
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = Color(0xFFBBDEFB)
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
                     )
                 ) {
                     Icon(
                         Icons.Default.VolumeUp,
                         contentDescription = "朗读",
-                        tint = Color(0xFF1565C0)
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
 
-            // ── 反面（翻转超过90°才显示） ──
+            // ── 反面 ──
             if (!showFront) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -156,22 +145,19 @@ fun FlashcardView(
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    // 反面也有读音按钮
                     Spacer(Modifier.height(16.dp))
                     FilledTonalIconButton(
-                        onClick = {
-                            tts.speak(frontText, TextToSpeech.QUEUE_FLUSH, null, null)
-                        },
+                        onClick = { speakWord(frontText) },
                         modifier = Modifier.size(48.dp),
                         shape = CircleShape,
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = Color(0xFFE1BEE7)
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
                         )
                     ) {
                         Icon(
                             Icons.Default.VolumeUp,
                             contentDescription = "朗读",
-                            tint = Color(0xFF6A1B9A)
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     }
                 }

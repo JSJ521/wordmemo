@@ -1,14 +1,22 @@
 package com.wordmemo.app.ui.component
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.wordmemo.app.ui.theme.OfflineGray
 
 @Composable
 fun OfflineBanner(
@@ -18,12 +26,12 @@ fun OfflineBanner(
     if (isOffline) {
         Surface(
             modifier = modifier.fillMaxWidth(),
-            color = OfflineGray.copy(alpha = 0.15f),
+            color = MaterialTheme.colorScheme.errorContainer,
             shape = RoundedCornerShape(0.dp)
         ) {
             Text(
                 text = "离线模式 — AI 功能不可用，基础功能正常运行",
-                color = OfflineGray,
+                color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
@@ -35,16 +43,39 @@ fun OfflineBanner(
 fun SkeletonLoader(
     modifier: Modifier = Modifier
 ) {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val shimmerOffset = transition.animateFloat(
+        initialValue = -300f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmer_offset"
+    )
+
+    val base = MaterialTheme.colorScheme.surfaceVariant
+    val shimmer = Brush.linearGradient(
+        colors = listOf(
+            base,
+            base.copy(alpha = 0.3f),
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+            base.copy(alpha = 0.3f),
+            base
+        ),
+        start = Offset(shimmerOffset.value, 0f),
+        end = Offset(shimmerOffset.value + 300f, 0f)
+    )
+
     Column(modifier = modifier.padding(16.dp)) {
         repeat(3) {
-            Surface(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(80.dp)
-                    .padding(vertical = 4.dp),
-                color = Color.LightGray.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(8.dp)
-            ) {}
+                    .padding(vertical = 4.dp)
+                    .background(shimmer, MaterialTheme.shapes.small)
+            )
         }
     }
 }
@@ -64,7 +95,7 @@ fun SearchBar(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         singleLine = true,
-        shape = RoundedCornerShape(24.dp)
+        shape = MaterialTheme.shapes.medium
     )
 }
 

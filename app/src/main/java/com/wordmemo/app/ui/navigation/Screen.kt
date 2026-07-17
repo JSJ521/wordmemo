@@ -16,16 +16,10 @@ sealed class Screen(val route: String, val title: String = "", val icon: ImageVe
     data object ReviewSession : Screen("review_session", "复习", Icons.Default.Loop)
     data object Groups : Screen("groups", "分组", Icons.Default.Folder)
     data object Settings : Screen("settings", "设置", Icons.Default.Settings)
-    data class AiMnemonics(val wordId: Long) : Screen("ai_mnemonics/{wordId}", "AI 助记") {
+    data class AiLearning(val wordId: Long) : Screen("ai_learning/{wordId}", "AI 学习") {
         companion object {
-            const val ROUTE = "ai_mnemonics/{wordId}"
-            fun createRoute(wordId: Long) = "ai_mnemonics/$wordId"
-        }
-    }
-    data class AiRelations(val wordId: Long) : Screen("ai_relations/{wordId}", "关联图谱") {
-        companion object {
-            const val ROUTE = "ai_relations/{wordId}"
-            fun createRoute(wordId: Long) = "ai_relations/$wordId"
+            const val ROUTE = "ai_learning/{wordId}"
+            fun createRoute(wordId: Long) = "ai_learning/$wordId"
         }
     }
     data class WordGraph(val wordId: Long) : Screen("word_graph/{wordId}", "单词图谱") {
@@ -35,4 +29,5 @@ sealed class Screen(val route: String, val title: String = "", val icon: ImageVe
         }
     }
     data object Stats : Screen("stats", "统计", Icons.Default.BarChart)
+    data object Ocr : Screen("ocr", "OCR扫描", Icons.Default.TextSnippet)
 }

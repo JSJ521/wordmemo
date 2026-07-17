@@ -57,14 +57,14 @@ fun StatsScreen(
                         title = "总单词",
                         value = "${uiState.stats.totalWords}",
                         icon = Icons.Default.MenuBook,
-                        color = Color(0xFF1976D2),
+                        color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
                         title = "待复习",
                         value = "${uiState.stats.dueCards}",
                         icon = Icons.Default.Loop,
-                        color = Color(0xFFFFA726),
+                        color = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -74,14 +74,14 @@ fun StatsScreen(
                         title = "已掌握",
                         value = "${uiState.stats.masteredWords}",
                         icon = Icons.Default.CheckCircle,
-                        color = Color(0xFF43A047),
+                        color = MaterialTheme.colorScheme.tertiary,
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
                         title = "总复习",
                         value = "${uiState.stats.totalReviews}",
                         icon = Icons.Default.Replay,
-                        color = Color(0xFF7C4DFF),
+                        color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -94,14 +94,14 @@ fun StatsScreen(
                         title = "今日复习",
                         value = "${uiState.stats.todayReviews}",
                         icon = Icons.Default.Today,
-                        color = Color(0xFF26A69A),
+                        color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
                         title = "今日新增",
                         value = "${uiState.stats.todayNewCards} / ${uiState.stats.dailyReviewLimit}",
                         icon = Icons.Default.AddCircle,
-                        color = Color(0xFFE91E63),
+                        color = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -115,7 +115,7 @@ fun StatsScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("FSRS 参数优化", color = Color.Gray)
+                            Text("FSRS 参数优化", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                             Text(
                                 if (uiState.stats.fsrsOptimized) "已优化" else "默认参数",
                                 fontWeight = FontWeight.Medium
@@ -155,7 +155,7 @@ private fun StatCard(
             )
             Text(
                 text = title,
-                color = Color.Gray,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
         }

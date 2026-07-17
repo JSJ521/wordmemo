@@ -9,9 +9,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.wordmemo.app.ui.screen.addword.AddWordScreen
-import com.wordmemo.app.ui.screen.aimnemonics.AiMnemonicsScreen
-import com.wordmemo.app.ui.screen.airelations.AiRelationsScreen
+import com.wordmemo.app.ui.screen.ailearning.AiLearningScreen
 import com.wordmemo.app.ui.screen.groups.GroupsScreen
+import com.wordmemo.app.ui.screen.ocr.OcrScreen
 import com.wordmemo.app.ui.screen.review.ReviewSessionScreen
 import com.wordmemo.app.ui.screen.settings.SettingsScreen
 import com.wordmemo.app.ui.screen.stats.StatsScreen
@@ -48,6 +48,7 @@ fun NavGraph(navController: NavHostController) {
                 onNavigateToGroups = { navController.navigate(Screen.Groups.route) },
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                 onNavigateToStats = { navController.navigate(Screen.Stats.route) },
+                onNavigateToOcr = { navController.navigate(Screen.Ocr.route) },
                 initialGroupId = groupId
             )
         }
@@ -70,11 +71,8 @@ fun NavGraph(navController: NavHostController) {
             WordDetailScreen(
                 wordId = wordId,
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToMnemonics = {
-                    navController.navigate(Screen.AiMnemonics.createRoute(wordId))
-                },
-                onNavigateToRelations = {
-                    navController.navigate(Screen.AiRelations.createRoute(wordId))
+                onNavigateToAiLearning = {
+                    navController.navigate(Screen.AiLearning.createRoute(wordId))
                 },
                 onNavigateToGraph = {
                     navController.navigate(Screen.WordGraph.createRoute(wordId))
@@ -118,31 +116,15 @@ fun NavGraph(navController: NavHostController) {
         }
 
         composable(
-            route = Screen.AiMnemonics.ROUTE,
+            route = Screen.AiLearning.ROUTE,
             arguments = listOf(navArgument("wordId") { type = NavType.LongType }),
             enterTransition = { fadeIn(animationSpec = tween(250)) },
             exitTransition = { fadeOut(animationSpec = tween(200)) }
         ) { backStackEntry ->
             val wordId = backStackEntry.arguments?.getLong("wordId") ?: return@composable
-            AiMnemonicsScreen(
+            AiLearningScreen(
                 wordId = wordId,
                 onNavigateBack = { navController.popBackStack() }
-            )
-        }
-
-        composable(
-            route = Screen.AiRelations.ROUTE,
-            arguments = listOf(navArgument("wordId") { type = NavType.LongType }),
-            enterTransition = { fadeIn(animationSpec = tween(250)) },
-            exitTransition = { fadeOut(animationSpec = tween(200)) }
-        ) { backStackEntry ->
-            val wordId = backStackEntry.arguments?.getLong("wordId") ?: return@composable
-            AiRelationsScreen(
-                wordId = wordId,
-                onNavigateBack = { navController.popBackStack() },
-                onNavigateToWord = { targetWordId ->
-                    navController.navigate(Screen.WordDetail.createRoute(targetWordId))
-                }
             )
         }
 
@@ -163,6 +145,14 @@ fun NavGraph(navController: NavHostController) {
             val wordId = backStackEntry.arguments?.getLong("wordId") ?: return@composable
             WordGraphScreen(
                 wordId = wordId,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.Ocr.route,
+            enterTransition = { fadeSlideIn },
+            exitTransition = { fadeSlideOut }
+        ) { OcrScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

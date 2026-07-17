@@ -50,6 +50,7 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
     val uiState: StateFlow<WordGraphUiState> = _uiState.asStateFlow()
 
     private var centerWordForRelations: String = ""
+    private var graphAiError: String? = null
 
     fun loadWord(wordId: Long) {
         viewModelScope.launch {
@@ -84,15 +85,32 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
                         aiGen.setCenterWord(word.english)
                         val config = aiGen.loadApiConfig(db)
                         if (config != null) {
-                            val json = aiGen.generateRelations(word.english, config.first, config.second, config.third)
+                            val json = try {
+                                aiGen.generateRelations(word.english, config.first, config.second, config.third)
+                            } catch (e: Exception) {
+                                graphAiError = "API异常: ${e.message}"
+                                null
+                            }
                             if (json != null) {
                                 val result = aiGen.parseResult(json)
                                 if (result != null && result.relations.size >= 5) {
+                                    graphAiError = null
                                     return@withContext buildGraphFromAi(result, word.english, word.chinese)
+                                } else {
+                                    graphAiError = graphAiError ?: "AI解析失败: ${json.take(100)}"
+                                }
+                            } else {
+                                // 如果 catch 已经设了错误，保留它
+                                if (graphAiError == null) {
+                                    graphAiError = "API调用无响应"
                                 }
                             }
+                        } else {
+                            graphAiError = "API Key缺失"
                         }
-                    } catch (_: Exception) { }
+                    } catch (e: Exception) {
+                        graphAiError = "异常: ${e.message}"
+                    }
 
                     // AI不可用或无结果 → 返回空图
                     MultiLevelGraph(centerWord = word.english, nodes = listOf(
@@ -103,7 +121,8 @@ class WordGraphViewModel(application: Application) : AndroidViewModel(applicatio
                 _uiState.value = WordGraphUiState(
                     centerWord = word,
                     graph = graph,
-                    isLoading = false
+                    isLoading = false,
+                    error = graphAiError?.let { "AI图谱生成失败: $it" }
                 )
 
             } catch (e: Exception) {

@@ -23,10 +23,7 @@ class WordMemoApp : Application() {
                 val db = WordMemoDatabase.getInstance(this@WordMemoApp)
                 val existing = db.appConfigDao().getValue("api_key")
                 if (existing == null || existing.value.isBlank()) {
-                    val cipher = ApiKeyCipher()
-                    val encrypted = cipher.encrypt("sk-8287a50c5c9d46a680b44e61e0f424f6")
-                    db.appConfigDao().setValue(AppConfigEntity("api_key", encrypted))
-                    android.util.Log.i("WordMemoApp", "✅ API Key 已自动恢复")
+                    android.util.Log.w("WordMemoApp", "⚠️ API Key 未找到，请用户在设置页手动配置")
                 }
                 // 同时确保 baseUrl 和 model 有默认值
                 if (db.appConfigDao().getValue("api_base_url") == null) {

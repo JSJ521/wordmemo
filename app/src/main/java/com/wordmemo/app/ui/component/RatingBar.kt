@@ -99,7 +99,7 @@ private fun RatingButton(
         interactionSource = interactionSource,
         modifier = modifier
             .width(96.dp)
-            .height(38.dp)
+            .height(48.dp)
             .scale(scale),
         colors = ButtonDefaults.buttonColors(
             containerColor = color,
@@ -114,12 +114,6 @@ private fun RatingButton(
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                text = subLabel,
-                fontSize = 10.sp,
-                color = Color.White.copy(alpha = 0.8f)
             )
         }
     }

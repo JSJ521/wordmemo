@@ -85,11 +85,12 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
     suspend fun generateVocab(
         apiConfig: AiConfig,
         difficultyLevel: Int,
-        count: Int = 8
+        count: Int = 8,
+        existingVocab: List<String> = emptyList()
     ): Result<List<GeneratedWord>> = withContext(Dispatchers.IO) {
         for (attempt in 1..2) {
             try {
-                val prompt = buildPrompt(difficultyLevel, count)
+                val prompt = buildPrompt(difficultyLevel, count, existingVocab)
                 val client = AiApiClient(gson)
                 val raw = client.chatCompletion(
                     apiConfig.baseUrl, apiConfig.apiKey, apiConfig.model,
@@ -105,10 +106,14 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
 
                 // 质量过滤
                 val valid = filterValidWords(combined)
-                android.util.Log.i("AiWordGenerator", "尝试 $attempt: ${combined.size}个原始, ${valid.size}个合格")
 
-                if (valid.size >= 5) {
-                    return@withContext Result.success(valid.take(count))
+                // 去重：相同英文词只保留第一个
+                val deduplicated = valid.distinctBy { it.english.lowercase().trim() }
+
+                android.util.Log.i("AiWordGenerator", "尝试 $attempt: ${combined.size}个原始, ${valid.size}个合格, ${deduplicated.size}个去重")
+
+                if (deduplicated.size >= 5) {
+                    return@withContext Result.success(deduplicated.take(count))
                 }
                 // 合格词太少 → 重试
                 android.util.Log.w("AiWordGenerator", "合格词不足 ${valid.size}/$count, 重试...")
@@ -119,7 +124,7 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
         Result.failure(Exception("AI 生成失败，请重试"))
     }
 
-    private fun buildPrompt(level: Int, count: Int): String = """
+    private fun buildPrompt(level: Int, count: Int, existingVocab: List<String> = emptyList()): String = """
 你是一位英语词汇专家，专精于海外 EPC（Engineering-Procurement-Construction）工程项目的商务与技术英语。
 
 你的任务：为一位中国籍海外光伏/风电/储能 EPC 项目的项目经理/总工，生成 $count 个实用英语词汇。
@@ -153,8 +158,9 @@ class AiWordGenerator(private val gson: Gson = Gson()) {
   }
 ]
 ```
-
-⚠️ **重要：必须输出对象数组，不是字符串数组。每项必须有 english 字段。不要输出 ["word1","word2"] 这种格式。**
+|⚠️ **重要：必须输出对象数组，不是字符串数组。每项必须有 english 字段。不要输出 ["word1","word2"] 这种格式。**
+|
+|${if (existingVocab.isNotEmpty()) "【已有词汇清单 — 请避免重复生成】\n用户已掌握以下词汇，请严格避开，生成全新的词汇：\n" + existingVocab.joinToString(", ") + "\n" else ""}
 """.trimIndent()
     /** 健壮的 JSON 解析 */
     private fun parseWordsRobust(text: String): List<GeneratedWord> {

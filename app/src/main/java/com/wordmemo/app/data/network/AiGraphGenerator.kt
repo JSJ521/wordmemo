@@ -3,6 +3,10 @@ package com.wordmemo.app.data.network
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.wordmemo.app.data.local.WordMemoDatabase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * 用 AI API 动态生成单词关系图谱。
@@ -31,25 +35,22 @@ class AiGraphGenerator(private val gson: Gson = Gson()) {
                 cipher.decrypt(it.value)
             } ?: ""
 
-            // 如果 Key 缺失，自动恢复（加密失败时降级为明文）
-            if (apiKey.isBlank()) {
-                try {
-                    val restored = cipher.encrypt("sk-8287a50c5c9d46a680b44e61e0f424f6")
-                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_key", restored))
-                    android.util.Log.i("AiGraphGenerator", "✅ API Key 自动恢复（加密存储）")
-                    apiKey = "sk-8287a50c5c9d46a680b44e61e0f424f6"
-                } catch (_: Exception) {
-                    // 加密失败，直接存明文（decrypt 会处理）
-                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_key", "sk-8287a50c5c9d46a680b44e61e0f424f6"))
-                    android.util.Log.w("AiGraphGenerator", "⚠️ API Key 明文存储（加密不可用）")
-                    apiKey = "sk-8287a50c5c9d46a680b44e61e0f424f6"
-                }
-                // 同时确保 baseUrl 和 model 有默认值
-                if (configs.none { it.key == "api_base_url" })
-                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_base_url", "https://api.deepseek.com"))
-                if (configs.none { it.key == "api_model" })
-                    db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_model", "deepseek-chat"))
+            // 检测数据库中的截断 Key（仅识别 ... 标记）
+            if (!apiKey.isBlank() && apiKey.contains("...")) {
+                android.util.Log.w("AiGraphGenerator", "⚠️ 检测到截断 Key")
+                apiKey = ""
             }
+
+            // 如果 Key 缺失，返回 null（让调用方显示错误提示）
+            if (apiKey.isBlank()) {
+                android.util.Log.e("AiGraphGenerator", "API Key 未配置")
+                return null
+            }
+            // 同时确保 baseUrl 和 model 有默认值
+            if (configs.none { it.key == "api_base_url" })
+                db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_base_url", "https://api.deepseek.com"))
+            if (configs.none { it.key == "api_model" })
+                db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_model", "deepseek-chat"))
 
             val baseUrl = configs.firstOrNull { it.key == "api_base_url" }?.value
                 ?: "https://api.deepseek.com"
@@ -84,7 +85,7 @@ class AiGraphGenerator(private val gson: Gson = Gson()) {
 [
   {
     "word": "l1_word",
-    "chinese": "中文释义（说明与L0的关系，如同义/反义/搭配等）",
+    "chinese": "中文释义（说明与L0的关系）",
     "type": "synonym/antonym/collocation/concept/similar",
     "children": [
       {"word": "l2_word_a", "chinese": "中文释义（说明与父级L1的关系）", "type": "关系类型"},
@@ -95,38 +96,106 @@ class AiGraphGenerator(private val gson: Gson = Gson()) {
 
 示例——中心词 "abandon":
 [
-  {"word":"desert","chinese":"抛弃（abandon的同义词，指离开某人或某地）","type":"synonym","children":[
-    {"word":"forsake","chinese":"遗弃（desert的同义词，更强调永远放弃）","type":"synonym"},
-    {"word":"retain","chinese":"保留（desert的反义词）","type":"antonym"}]},
+  {"word":"desert","chinese":"抛弃（abandon的同义词）","type":"synonym","children":[
+    {"word":"forsake","chinese":"遗弃","type":"synonym"},
+    {"word":"retain","chinese":"保留","type":"antonym"}]},
   {"word":"keep","chinese":"保留（abandon的反义词）","type":"antonym","children":[
-    {"word":"maintain","chinese":"维持（keep的同义词）","type":"synonym"},
-    {"word":"discard","chinese":"丢弃（keep的反义词）","type":"antonym"}]},
-  {"word":"give up","chinese":"放弃（abandon的同义短语，指放弃尝试）","type":"synonym","children":[
-    {"word":"surrender","chinese":"投降（give up的同义词）","type":"synonym"},
-    {"word":"persist","chinese":"坚持（give up的反义词）","type":"antonym"}]},
-  {"word":"abolish","chinese":"废除（与abandon相似的「放弃」概念，多指制度/法律）","type":"similar","children":[
-    {"word":"eliminate","chinese":"消除（abolish的同义词）","type":"synonym"},
-    {"word":"establish","chinese":"建立（abolish的反义词）","type":"antonym"}]},
-  {"word":"leave","chinese":"离开（abandon的相关概念，指离开某地/某人）","type":"concept","children":[
-    {"word":"depart","chinese":"出发（leave的同义词）","type":"synonym"},
-    {"word":"arrive","chinese":"到达（leave的反义词）","type":"antonym"}]},
-  {"word":"quit","chinese":"退出（abandon的同义词，指退出组织/习惯）","type":"synonym","children":[
-    {"word":"resign","chinese":"辞职（quit的同义词，正式场合）","type":"synonym"},
-    {"word":"continue","chinese":"继续（quit的反义词）","type":"antonym"}]},
-  {"word":"adopt","chinese":"采纳（abandon的反义概念，指接受而非放弃）","type":"antonym","children":[
-    {"word":"embrace","chinese":"拥抱/接受（adopt的同义词）","type":"synonym"},
-    {"word":"reject","chinese":"拒绝（adopt的反义词）","type":"antonym"}]}
+    {"word":"maintain","chinese":"维持","type":"synonym"},
+    {"word":"discard","chinese":"丢弃","type":"antonym"}]}
 ]
-
-【额外要求】
-- 所选单词必须为英文，且为常见或实用词汇。
-- 如果某个方向难以扩展，可以适当放宽关系类型，但必须保证每条关系都有明确的语义依据。
-- 最终输出请只包含 JSON 数组，不要额外添加无关说明。
 
 请开始为 "$centerWord" 构建。"""
 
-        val client = AiApiClient(gson)
-        val raw = client.chatCompletion(baseUrl, apiKey, model, prompt, "请生成")
+        // 直接使用 OkHttp 调用，不经过 AiApiClient
+        return withContext(Dispatchers.IO) {
+            // 先尝试标准调用
+            try {
+                val urlStr = "${baseUrl.trimEnd('/')}/chat/completions"
+                val jsonBody = """{
+                    "model": "$model",
+                    "messages": [{"role": "user", "content": ${gson.toJson(prompt)}}],
+                    "temperature": 0.7,
+                    "max_tokens": 4000
+                }""".trimIndent()
+                
+                val result = doApiCall(urlStr, apiKey, jsonBody)
+                if (result != null) return@withContext result
+            } catch (_: Exception) { }
+            
+            // 兜底：用宽松 SSL 再试一次
+            try {
+                val urlStr = "${baseUrl.trimEnd('/')}/chat/completions"
+                val jsonBody = """{
+                    "model": "$model",
+                    "messages": [{"role": "user", "content": ${gson.toJson(prompt)}}],
+                    "temperature": 0.7,
+                    "max_tokens": 4000
+                }""".trimIndent()
+                val relaxedResult = doApiCallRelaxed(urlStr, apiKey, jsonBody)
+                if (relaxedResult != null) return@withContext relaxedResult
+            } catch (_: Exception) { }
+            
+            null
+        }
+    }
+    
+    /** 标准 OkHttp 调用（每次新建连接，避免池复用问题） */
+    private suspend fun doApiCall(urlStr: String, apiKey: String, jsonBody: String): String? {
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(180, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            .connectionPool(okhttp3.ConnectionPool(0, 1, java.util.concurrent.TimeUnit.MILLISECONDS))
+            .retryOnConnectionFailure(true)
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+            .build()
+        val body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
+        val request = okhttp3.Request.Builder()
+            .url(urlStr)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(body)
+            .build()
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) {
+            val errBody = response.body?.string() ?: "no body"
+            throw java.io.IOException("HTTP ${response.code}: ${errBody.take(100)}")
+        }
+        val raw = response.body?.string()
+        val content = raw?.let { extractAiContent(it) }
+        return content?.let { extractJsonArray(it) }
+    }
+    
+    /** 宽松 SSL 调用（兼容部分运营商证书问题） */
+    private suspend fun doApiCallRelaxed(urlStr: String, apiKey: String, jsonBody: String): String? {
+        val trustAll = object : javax.net.ssl.X509TrustManager {
+            override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
+            override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
+            override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+        }
+        val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
+        sslContext.init(null, arrayOf(trustAll), java.security.SecureRandom())
+        
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(180, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            .sslSocketFactory(sslContext.socketFactory, trustAll)
+            .hostnameVerifier { _, _ -> true }
+            .connectionPool(okhttp3.ConnectionPool(0, 1, java.util.concurrent.TimeUnit.MILLISECONDS))
+            .retryOnConnectionFailure(true)
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+            .build()
+        val body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
+        val request = okhttp3.Request.Builder()
+            .url(urlStr)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(body)
+            .build()
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) return null
+        val raw = response.body?.string()
         val content = raw?.let { extractAiContent(it) }
         return content?.let { extractJsonArray(it) }
     }
@@ -140,48 +209,154 @@ class AiGraphGenerator(private val gson: Gson = Gson()) {
             msg.get("content")?.asString ?: text
         } catch (_: Exception) { text }
     }
-
     /** 从文本中提取 JSON 数组 */
     private fun extractJsonArray(text: String): String? {
         val trimmed = text.trim()
+        
+        // 方式1: 从 ```json 代码块中提取
         val codeBlock = Regex("""```(?:json)?\s*\n?([\s\S]*?)\n?```""").find(trimmed)
         if (codeBlock != null) {
             val content = codeBlock.groupValues[1].trim()
             if (content.startsWith("[") || content.startsWith("{")) return content
         }
-        if (trimmed.startsWith("[")) return trimmed
-        if (trimmed.startsWith("{")) return trimmed
-        val start = trimmed.indexOf('[')
-        val end = trimmed.lastIndexOf(']')
-        if (start >= 0 && end > start) return trimmed.substring(start, end + 1)
-        val startB = trimmed.indexOf('{')
-        val endB = trimmed.lastIndexOf('}')
-        if (startB >= 0 && endB > startB) return trimmed.substring(startB, endB + 1)
+        
+        // 方式2: 找第一个 [ 到最后一个 ]
+        val startB = trimmed.indexOf('[')
+        val endB = trimmed.lastIndexOf(']')
+        if (startB >= 0 && endB > startB) {
+            val candidate = trimmed.substring(startB, endB + 1)
+            // 验证候选 JSON 是否能解析
+            if (isValidJsonArray(candidate)) return candidate
+            // 如果开头有残渣（如 [} 这种），尝试修复
+            val fixed = fixBrokenJsonArray(candidate)
+            if (fixed != null) return fixed
+            // 尝试找真正的 [ 开始的第一个 { 
+            val firstObj = candidate.indexOf('{')
+            if (firstObj > 0) {
+                val reExtract = trimmed.substring(startB + firstObj, endB + 1)
+                if (isValidJsonArray(reExtract)) return reExtract
+            }
+        }
+        
+        // 方式3: 找 { 到最后一个 }
+        val startO = trimmed.indexOf('{')
+        val endO = trimmed.lastIndexOf('}')
+        if (startO >= 0 && endO > startO) {
+            val candidate = trimmed.substring(startO, endO + 1)
+            if (isValidJsonArray(candidate)) return candidate
+        }
+        
         return null
     }
 
-    /** 解析 AI 返回的 JSON 为图谱数据（新版：纯数组格式） */
+    /** 检查字符串是否是合法的 JSON 数组 */
+    private fun isValidJsonArray(text: String): Boolean {
+        val t = text.trim()
+        if (!t.startsWith("[")) return false
+        return try {
+            JsonParser.parseString(t)
+            true
+        } catch (_: Exception) { false }
+    }
+
+    /** 修复以 [ 开头但紧接着 } 的残缺 JSON */
+    private fun fixBrokenJsonArray(text: String): String? {
+        // 去掉 [ 开头的非 { 字符（如 [} 变成 [）
+        var cleaned = text.trim()
+        if (cleaned.startsWith("[")) {
+            // 找到第一个真正的 {
+            val firstObj = cleaned.indexOf('{')
+            if (firstObj > 0) {
+                cleaned = "[" + cleaned.substring(firstObj)
+            }
+            // 找到最后一个 } 并确保后面是 ]
+            val lastObj = cleaned.lastIndexOf('}')
+            if (lastObj > 0) {
+                val beforeClose = cleaned.substring(0, lastObj + 1)
+                val afterClose = cleaned.substring(lastObj + 1)
+                if (afterClose.contains("]")) {
+                    cleaned = beforeClose + "]"
+                }
+            }
+            if (isValidJsonArray(cleaned)) return cleaned
+        }
+        return null
+    }
+
+    /** 解析 AI 返回的 JSON 为图谱数据 */
     fun parseResult(json: String): AiGraphResult? {
         return try {
-            val arr = JsonParser.parseString(json).asJsonArray
-            val relations = arr.mapNotNull { el ->
+            val root = JsonParser.parseString(json)
+            val relations = mutableListOf<AiRelation>()
+
+            if (root.isJsonArray) {
+                val arr = root.asJsonArray
+                for (el in arr) {
+                    val obj = el.asJsonObject
+                    val word = obj.get("word")?.asString ?: continue
+                    val type = obj.get("type")?.asString ?: ""
+                    val children = parseChildren(obj.getAsJsonArray("children"))
+
+                    if (word.lowercase() == centerWordForRelations.lowercase()) {
+                        // 格式0: 中心词作为第一项，children 是真正的 L1
+                        relations.addAll(children)
+                    } else {
+                        // 格式1: 扁平数组 [L1, L1, ...]
+                        relations.add(AiRelation(word, obj.get("chinese")?.asString ?: "", type, children))
+                    }
+                }
+            } else if (root.isJsonObject) {
+                val obj = root.asJsonObject
+                // 格式2: 嵌套对象 {word, children: [L1{w, children:[L2]}]}
+                val childrenArr = obj.getAsJsonArray("children")
+                if (childrenArr != null) {
+                    for (el in childrenArr) {
+                        val co = el.asJsonObject
+                        val word = co.get("word")?.asString ?: continue
+                        val chinese = co.get("chinese")?.asString ?: ""
+                        val type = co.get("type")?.asString ?: ""
+                        val l2 = parseChildren(co.getAsJsonArray("children"))
+                        relations.add(AiRelation(word, chinese, type, l2))
+                    }
+                }
+                // 格式3: 对象含 relations/data/words 数组字段
+                if (relations.isEmpty()) {
+                    for (key in listOf("relations", "data", "words")) {
+                        val arr = obj.getAsJsonArray(key)
+                        if (arr != null) {
+                            for (el in arr) {
+                                val co = el.asJsonObject
+                                val word = co.get("word")?.asString ?: co.get("english")?.asString ?: continue
+                                val chinese = co.get("chinese")?.asString ?: co.get("meaning")?.asString ?: ""
+                                val type = co.get("type")?.asString ?: co.get("relation")?.asString ?: ""
+                                val children = parseChildren(co.getAsJsonArray("children") ?: co.getAsJsonArray("l2"))
+                                relations.add(AiRelation(word, chinese, type, children))
+                            }
+                            break
+                        }
+                    }
+                }
+            }
+
+            if (relations.size < 3) return null
+            AiGraphResult(centerWordForRelations, relations.distinctBy { it.word.lowercase() })
+        } catch (_: Exception) { null }
+    }
+
+    /** 解析 children 数组 */
+    private fun parseChildren(arr: com.google.gson.JsonArray?): List<AiRelation> {
+        if (arr == null) return emptyList()
+        return arr.mapNotNull { el ->
+            try {
                 val obj = el.asJsonObject
                 val word = obj.get("word")?.asString ?: return@mapNotNull null
                 val chinese = obj.get("chinese")?.asString ?: ""
                 val type = obj.get("type")?.asString ?: ""
-                val children = obj.getAsJsonArray("children")?.mapNotNull { c ->
-                    val co = c.asJsonObject
-                    AiRelation(
-                        co.get("word")?.asString ?: return@mapNotNull null,
-                        co.get("chinese")?.asString ?: "",
-                        co.get("type")?.asString ?: ""
-                    )
-                } ?: emptyList()
-                AiRelation(word, chinese, type, children)
-            }
-            if (relations.size < 3) return null
-            AiGraphResult(centerWordForRelations, relations)
-        } catch (_: Exception) { null }
+                // 递归处理三层 children（AI 有时会继续嵌套）
+                val grandChildren = parseChildren(obj.getAsJsonArray("children"))
+                AiRelation(word, chinese, type, grandChildren)
+            } catch (_: Exception) { null }
+        }
     }
 
     private var centerWordForRelations: String = ""

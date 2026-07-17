@@ -30,10 +30,20 @@ class AiRepositoryImpl @Inject constructor(
     private suspend fun getConfig(): Triple<String, String, String> {
         val baseUrl = appConfigDao.getValue(Constants.KEY_API_BASE_URL)?.value ?: "https://api.deepseek.com"
         val model = appConfigDao.getValue(Constants.KEY_API_MODEL)?.value ?: "deepseek-chat"
-        val encryptedKey = appConfigDao.getValue(Constants.KEY_API_KEY_ENCRYPTED)?.value ?: ""
-        val apiKey = if (encryptedKey.isNotBlank()) {
-            try { com.wordmemo.app.data.encryption.ApiKeyCipher().decrypt(encryptedKey) } catch (_: Exception) { "sk-4ca3b87c453143a98c7af202947a8b13" }
-        } else "sk-4ca3b87c453143a98c7af202947a8b13"
+        val encryptedKey = appConfigDao.getValue("api_key")?.value ?: ""
+        var apiKey = if (encryptedKey.isNotBlank()) {
+            try {
+                val decrypted = com.wordmemo.app.data.encryption.ApiKeyCipher().decrypt(encryptedKey)
+                // 仅当包含 ... 标记才视为截断
+                if (decrypted.contains("...")) {
+                    "⚠️ API Key 已损坏，请在设置页重新配置"
+                } else decrypted
+            } catch (_: Exception) {
+                "⚠️ API Key 解密失败，请在设置页重新配置"
+            }
+        } else {
+            "⚠️ API Key 未配置，请在设置页填写"
+        }
         return Triple(baseUrl, apiKey, model)
     }
 

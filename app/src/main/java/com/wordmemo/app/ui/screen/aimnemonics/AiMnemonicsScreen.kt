@@ -73,7 +73,7 @@ fun AiMnemonicsScreen(
                 Text(
                     text = uiState.word?.chinese ?: "",
                     fontSize = 18.sp,
-                    color = Color.Gray
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(16.dp))
 

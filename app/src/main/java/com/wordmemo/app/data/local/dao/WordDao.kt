@@ -43,6 +43,9 @@ interface WordDao {
     @Query("SELECT * FROM words WHERE english LIKE '%' || :query || '%' OR chinese LIKE '%' || :query || '%'")
     suspend fun search(query: String): List<WordEntity>
 
+    @Query("SELECT english FROM words")
+    suspend fun getAllEnglish(): List<String>
+
     @Query("SELECT COUNT(*) FROM words")
     suspend fun count(): Int
 }

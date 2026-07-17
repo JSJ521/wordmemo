@@ -25,8 +25,8 @@ android {
         applicationId = "com.wordmemo.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 22
-        versionName = "3.3.0"
+        versionCode = 73000
+        versionName = "V5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -38,6 +38,7 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("wordmemoRelease")
+            ndk { abiFilters += listOf("arm64-v8a") }
         }
         debug {
             isMinifyEnabled = false
@@ -99,6 +100,9 @@ dependencies {
 
     // Network (AI only)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Tesseract OCR (离线, 无需 Google Play Services, 兼容国产手机)
+    implementation("com.rmtheis:tess-two:9.1.0")
     implementation("com.google.code.gson:gson:2.10.1")
 
     // Encryption

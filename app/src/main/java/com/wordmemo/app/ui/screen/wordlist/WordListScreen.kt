@@ -2,6 +2,9 @@ package com.wordmemo.app.ui.screen.wordlist
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,10 +32,12 @@ fun WordListScreen(
     onNavigateToGroups: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToStats: () -> Unit,
+    onNavigateToOcr: () -> Unit,
     initialGroupId: Long? = null,
     viewModel: WordListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var showUtilityMenu by remember { mutableStateOf(false) }
 
     // 从分组页返回时应用选中的分组筛选
     LaunchedEffect(initialGroupId) {
@@ -44,7 +49,7 @@ fun WordListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("词鼠书记") },
+                title = { },
                 actions = {
                     BadgedBox(badge = {
                         if (uiState.dueCount > 0) {
@@ -55,28 +60,48 @@ fun WordListScreen(
                             Icon(Icons.Default.Loop, contentDescription = "复习")
                         }
                     }
+                    IconButton(onClick = onNavigateToAdd) {
+                        Icon(Icons.Default.Add, contentDescription = "添加单词")
+                    }
+                    IconButton(onClick = onNavigateToOcr) {
+                        Icon(Icons.Default.TextSnippet, contentDescription = "OCR扫描")
+                    }
                     IconButton(onClick = onNavigateToStats) {
                         Icon(Icons.Default.BarChart, contentDescription = "统计")
                     }
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置")
+                    IconButton(onClick = { showUtilityMenu = !showUtilityMenu }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+            AnimatedVisibility(
+                visible = showUtilityMenu,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                Surface(tonalElevation = 2.dp) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        IconButton(onClick = {
+                            showUtilityMenu = false
+                            onNavigateToGroups()
+                        }) { Icon(Icons.Default.Folder, contentDescription = "分组") }
+                        IconButton(onClick = {
+                            showUtilityMenu = false
+                            onNavigateToSettings()
+                        }) { Icon(Icons.Default.Settings, contentDescription = "设置") }
                     }
                 }
-            )
-        },
-        floatingActionButton = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SmallFloatingActionButton(onClick = onNavigateToGroups) {
-                    Icon(Icons.Default.Folder, contentDescription = "分组")
-                }
-                FloatingActionButton(onClick = onNavigateToAdd) {
-                    Icon(Icons.Default.Add, contentDescription = "添加单词")
-                }
             }
-        }
+        },
+        floatingActionButton = { }
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
             // Search bar
@@ -85,21 +110,13 @@ fun WordListScreen(
                 onQueryChange = { viewModel.onSearchQueryChanged(it) }
             )
 
-            // AI 行业词汇生成
-            AiVocabSection(
-                isGenerating = uiState.isGeneratingAi,
-                generatedWords = uiState.aiGeneratedWords,
-                resultMessage = uiState.aiGenerationResult,
-                onGenerate = { viewModel.generateAiVocab() },
-                onDismissResult = { viewModel.dismissAiResult() }
-            )
-
             // 筛选栏：全部 / 已掌握
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 FilterChip(
                     selected = !uiState.showMasteredOnly,
@@ -129,15 +146,14 @@ fun WordListScreen(
                             Icons.Default.MenuBook,
                             contentDescription = null,
                             modifier = Modifier.size(64.dp),
-                            tint = Color.Gray
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(16.dp))
                         if (uiState.selectedGroupId != null && uiState.words.none { it.id in uiState.masteredWordIds }) {
-                            Text("该分组还没有单词", color = Color.Gray, fontSize = 16.sp)
-                            Text("在单词详情页可分配分组", color = Color.Gray, fontSize = 14.sp)
+                            Text("该分组还没有单词", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                            Text("在单词详情页可分配分组", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                         } else {
-                            Text("还没有收藏单词", color = Color.Gray, fontSize = 16.sp)
-                            Text("点击 + 添加第一个单词", color = Color.Gray, fontSize = 14.sp)
+                            Text("加油，你是最棒滴！", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -199,7 +215,7 @@ private fun WordItem(
                 .fillMaxWidth()
                 .clickable { onClick() },
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            shape = RoundedCornerShape(12.dp)
+            shape = MaterialTheme.shapes.medium
         ) {
             Row(
                 modifier = Modifier
@@ -212,13 +228,13 @@ private fun WordItem(
                 Text(
                     text = word.english,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    style = MaterialTheme.typography.titleMedium
                 )
                 if (word.phonetic.isNotBlank()) {
                     Text(
                         text = word.phonetic,
-                        color = Color(0xFF78909C),
-                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Light
                     )
                     Spacer(Modifier.height(2.dp))
@@ -226,8 +242,8 @@ private fun WordItem(
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = word.chinese,
-                    color = Color.Gray,
-                    fontSize = 14.sp
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium
                 )
                 }
             }
@@ -289,14 +305,14 @@ private fun AiVocabSection(
 
             if (generatedWords.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Text("本次生成:", fontSize = 12.sp, color = Color.Gray)
+                Text("本次生成:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(4.dp))
                 generatedWords.forEach { w ->
                     Row(modifier = Modifier.padding(vertical = 2.dp)) {
                         Text("▸ ", fontSize = 13.sp, color = Color(0xFF1565C0))
                         Text(w.english, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         if (w.chinese.isNotBlank()) {
-                            Text(" — ${w.chinese}", fontSize = 12.sp, color = Color.Gray)
+                            Text(" — ${w.chinese}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }

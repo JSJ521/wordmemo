@@ -18,27 +18,32 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlin.math.*
 
-// ─── 配色方案 ───
-private val bgColor         = Color(0xFFF5F5F5)  // 浅灰白背景
-private val topBarColor     = Color(0xFFFFFFFF)  // 顶部栏白色
-private val centerColor     = Color(0xFF1A1A1A)  // 中心词深黑
-private val guideColor      = Color(0xFFE0E0E0)  // 引导环浅灰
-private val edgeColor       = Color(0xFFBDBDBD)  // 连接线浅灰
-private val bookmarkColor   = Color(0xFFFFCA28)  // 金色收藏标记
-
-// 字体颜色按关系类型区分
-private val typeColors = mapOf(
-    "synonym"     to Color(0xFF1565C0), // 同义 → 深蓝
-    "antonym"     to Color(0xFFC62828), // 反义 → 深红
-    "collocation" to Color(0xFF2E7D32), // 搭配 → 深绿
-    "similar"     to Color(0xFF6A1B9A), // 形近 → 紫色
-    "concept"     to Color(0xFFE65100)  // 概念 → 橙色
+// ─── 配色方案（Composable 级，跟随主题）───
+private class GraphColors(
+    val bg: () -> Color, val topBar: () -> Color, val center: () -> Color,
+    val guide: () -> Color, val edge: () -> Color, val bookmark: Color,
+    val typeColors: Map<String, Color>, val error: () -> Color, val subtitle: () -> Color
 )
+
+@Composable
+private fun rememberGraphColors(): GraphColors {
+    val c = MaterialTheme.colorScheme
+    return remember(c) { GraphColors(
+        bg = { c.background }, topBar = { c.surface }, center = { c.onBackground },
+        guide = { c.outlineVariant }, edge = { c.outline }, bookmark = Color(0xFFFFCA28),
+        typeColors = mapOf("synonym" to c.primary, "antonym" to c.error,
+            "collocation" to c.tertiary, "similar" to c.secondary, "concept" to Color(0xFFE65100)),
+        error = { c.error }, subtitle = { c.onSurfaceVariant }
+    )}}
+
 
 // 关系类型中文标签
 private val typeLabels = mapOf(
@@ -59,6 +64,7 @@ fun WordGraphScreen(
     LaunchedEffect(wordId) { viewModel.loadWord(wordId) }
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val gc = rememberGraphColors()
 
     LaunchedEffect(uiState.lastBookmarked) {
         uiState.lastBookmarked?.let { label ->
@@ -76,15 +82,15 @@ fun WordGraphScreen(
                 title = {
                     Text(
                         uiState.centerWord?.english?.let { "关系网: $it" } ?: "关系图谱",
-                        color = Color(0xFF212121)
+                        color = gc.center()
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color(0xFF616161))
+                        Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = gc.subtitle())
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = topBarColor)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = gc.topBar())
             )
         }
     ) { padding ->
@@ -92,19 +98,28 @@ fun WordGraphScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .background(bgColor)
+                .background(gc.bg())
         ) {
             when {
                 uiState.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = centerColor)
+                    CircularProgressIndicator(color = gc.center())
+                }
+                uiState.error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⚠️", fontSize = 28.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text(uiState.error ?: "", color = gc.error(), fontSize = 12.sp,
+                            textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp))
+                    }
                 }
                 uiState.graph.nodes.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("暂无关联词汇", color = Color.Gray)
+                    Text("暂无关联词汇", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 }
                 else -> RadialTextGraph(
                     graph = uiState.graph,
                     bookmarkedLabels = uiState.bookmarkedLabels,
-                    onBookmark = { label, chinese -> viewModel.addWordToBook(label, chinese) }
+                    onBookmark = { label, chinese -> viewModel.addWordToBook(label, chinese) },
+                    gc = gc
                 )
             }
         }
@@ -118,7 +133,8 @@ fun WordGraphScreen(
 private fun RadialTextGraph(
     graph: MultiLevelGraph,
     bookmarkedLabels: Set<String>,
-    onBookmark: (String, String) -> Unit
+    onBookmark: (String, String) -> Unit,
+    gc: GraphColors
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
@@ -197,11 +213,11 @@ private fun RadialTextGraph(
         val density = this.density
 
         // 1. 引导环（极淡灰）
-        drawGuideCircles(cx, cy, scale, density)
+        drawGuideCircles(cx, cy, scale, density, gc)
         // 2. 连接线（浅灰贝塞尔曲线）
-        drawEdges(graph, nodes, nodePositions, cx, cy, scale, density)
+        drawEdges(graph, nodes, nodePositions, cx, cy, scale, density, gc)
         // 3. 文字节点（纯文字，无圆圈）
-        drawTextNodes(nodes, nodePositions, cx, cy, scale, density, bookmarkedLabels, dragNodeId)
+        drawTextNodes(nodes, nodePositions, cx, cy, scale, density, bookmarkedLabels, dragNodeId, gc)
     }
 }
 
@@ -245,12 +261,12 @@ private fun calculateRadialPositions(
 //  绘制
 // ═══════════════════════════════════════════
 
-private fun DrawScope.drawGuideCircles(cx: Float, cy: Float, scale: Float, density: Float) {
+private fun DrawScope.drawGuideCircles(cx: Float, cy: Float, scale: Float, density: Float, gc: GraphColors) {
     val paint = android.graphics.Paint().apply {
         style = android.graphics.Paint.Style.STROKE
         strokeWidth = 0.8f * density
         isAntiAlias = true
-        this.color = android.graphics.Color.parseColor("#E0E0E0")
+        this.color = gc.guide().toArgb()
     }
     for (r in listOf(140f, 240f)) {
         drawContext.canvas.nativeCanvas.drawCircle(cx, cy, r * scale, paint)
@@ -259,7 +275,7 @@ private fun DrawScope.drawGuideCircles(cx: Float, cy: Float, scale: Float, densi
 
 private fun DrawScope.drawEdges(
     graph: MultiLevelGraph, nodes: List<GraphNode>, positions: List<Offset>,
-    cx: Float, cy: Float, scale: Float, density: Float
+    cx: Float, cy: Float, scale: Float, density: Float, gc: GraphColors
 ) {
     for (edge in graph.edges) {
         val fi = nodes.indexOfFirst { it.id == edge.from }
@@ -277,7 +293,7 @@ private fun DrawScope.drawEdges(
                 moveTo(from.x, from.y)
                 quadraticBezierTo(cp.x, cp.y, to.x, to.y)
             },
-            edgeColor.copy(alpha = alpha),
+            gc.edge().copy(alpha = alpha),
             style = Stroke(width = 1.2f * density, cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
     }
@@ -286,7 +302,7 @@ private fun DrawScope.drawEdges(
 private fun DrawScope.drawTextNodes(
     nodes: List<GraphNode>, positions: List<Offset>,
     cx: Float, cy: Float, scale: Float, density: Float,
-    bookmarkedLabels: Set<String>, dragNodeId: String?
+    bookmarkedLabels: Set<String>, dragNodeId: String?, gc: GraphColors
 ) {
     for (i in nodes.indices) {
         if (i >= positions.size) continue
@@ -303,8 +319,8 @@ private fun DrawScope.drawTextNodes(
         val isDrag = dragNodeId == node.id
 
         // 英文（根据类型着色）
-        val engColor = if (node.level == 0) centerColor
-            else typeColors[node.type] ?: Color(0xFF424242)
+        val engColor = if (node.level == 0) gc.center()
+            else gc.typeColors[node.type] ?: gc.subtitle()
         val label = if (node.label.length > 12) node.label.take(11) + "…" else node.label
 
         drawContext.canvas.nativeCanvas.apply {
@@ -324,7 +340,7 @@ private fun DrawScope.drawTextNodes(
             if (node.chinese.isNotBlank()) {
                 val cPaint = android.graphics.Paint().apply {
                     textSize = cnSize
-                    this.color = Color(0xFF757575).toArgb()
+                    this.color = gc.subtitle().toArgb()
                     textAlign = android.graphics.Paint.Align.CENTER
                     isAntiAlias = true
                 }
@@ -348,7 +364,7 @@ private fun DrawScope.drawTextNodes(
             if (node.label in bookmarkedLabels && node.level > 0) {
                 val sPaint = android.graphics.Paint().apply {
                     textSize = engSize * 0.8f
-                    this.color = bookmarkColor.toArgb()
+                    this.color = gc.bookmark.toArgb()
                     textAlign = android.graphics.Paint.Align.LEFT
                     isAntiAlias = true
                     typeface = android.graphics.Typeface.DEFAULT_BOLD

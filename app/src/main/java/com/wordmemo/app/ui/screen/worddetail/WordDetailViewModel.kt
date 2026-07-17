@@ -24,6 +24,7 @@ data class WordDetailUiState(
     val isLoading: Boolean = true,
     val isTranslating: Boolean = false,
     val translationResult: String? = null,
+    val translationError: String? = null,
     val allGroups: List<com.wordmemo.app.domain.model.Group> = emptyList(),
     val wordGroups: List<Long> = emptyList()
 )
@@ -61,6 +62,8 @@ class WordDetailViewModel(application: Application) : AndroidViewModel(applicati
                 // 自动翻译
                 if (word != null && isOnline && word.chinese.contains("待补充")) {
                     autoTranslate(word)
+                } else if (word != null && word.chinese.contains("待补充") && !isOnline) {
+                    _uiState.value = _uiState.value.copy(translationError = "当前无网络连接，无法自动获取翻译")
                 }
             } catch (e: Exception) {
                 _uiState.value = WordDetailUiState(
@@ -77,10 +80,16 @@ class WordDetailViewModel(application: Application) : AndroidViewModel(applicati
             val result = aiRepository.translate(word.english)
             if (result.translation.isNotBlank() && result.translation != "翻译不可用" && result.translation != "解析失败") {
                 val phonetic = if (result.phonetic.isNotBlank()) "[${result.phonetic}] " else ""
+                // 只在单词无已有备注时写入翻译用法说明
+                val newNote = if (word.note.isNullOrBlank() && !result.usage.isNullOrBlank()) {
+                    "📖 ${result.usage}"
+                } else {
+                    word.note // 保留用户已有备注
+                }
                 val updatedWord = Word(
                     id = word.id, english = word.english,
                     chinese = "$phonetic${result.translation}",
-                    note = result.usage ?: word.note,
+                    note = newNote,
                     createdAt = word.createdAt, updatedAt = System.currentTimeMillis()
                 )
                 wordDao.update(updatedWord.toEntity())
@@ -89,10 +98,33 @@ class WordDetailViewModel(application: Application) : AndroidViewModel(applicati
                     word = entity?.toDomain(), isTranslating = false, translationResult = result.translation
                 )
             } else {
-                _uiState.value = _uiState.value.copy(isTranslating = false, translationResult = null)
+                val errorMsg = if (result.translation.isBlank() || 
+                    result.translation == "翻译不可用" || 
+                    result.translation == "解析失败") {
+                    "AI翻译暂不可用，请检查网络连接或API配置"
+                } else {
+                    null
+                }
+                _uiState.value = _uiState.value.copy(
+                    isTranslating = false,
+                    translationResult = null,
+                    translationError = errorMsg
+                )
             }
         } catch (e: Exception) {
-            _uiState.value = _uiState.value.copy(isTranslating = false, translationResult = null)
+            _uiState.value = _uiState.value.copy(
+                isTranslating = false,
+                translationResult = null,
+                translationError = "翻译请求失败: ${e.message?.take(50) ?: "未知错误"}"
+            )
+        }
+    }
+
+    /** 重新尝试翻译 */
+    fun retryTranslate() {
+        val word = _uiState.value.word ?: return
+        viewModelScope.launch {
+            autoTranslate(word)
         }
     }
 

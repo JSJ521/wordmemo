@@ -57,8 +57,8 @@ class UpdateChecker(private val context: Context) {
                     }
                 }
 
-                val remoteVer = tagName.removePrefix("v")
-                val localVer = currentVersion.removePrefix("v")
+                val remoteVer = tagName.removePrefix("v").removePrefix("V")
+                val localVer = currentVersion.removePrefix("v").removePrefix("V")
                 val hasUpdate = compareVersions(remoteVer, localVer) > 0
 
                 UpdateInfo(hasUpdate, tagName, apkUrl, releaseNotes, releaseUrl)
@@ -165,6 +165,13 @@ class UpdateChecker(private val context: Context) {
     }
 
     private fun compareVersions(v1: String, v2: String): Int {
+        // 处理版本号方案变更：单号版本（如"5"）vs semver（如"7.22.0"）
+        // 单号版本是新一代版本号体系，语义上高于所有旧版semver
+        val dotCount1 = v1.count { it == '.' }
+        val dotCount2 = v2.count { it == '.' }
+        if (dotCount1 == 0 && dotCount2 > 0) return 1  // v1是新格式 → 更新
+        if (dotCount1 > 0 && dotCount2 == 0) return -1 // v2是新格式 → 更旧
+
         val parts1 = v1.split(".").map { it.toIntOrNull() ?: 0 }
         val parts2 = v2.split(".").map { it.toIntOrNull() ?: 0 }
         for (i in 0 until maxOf(parts1.size, parts2.size)) {

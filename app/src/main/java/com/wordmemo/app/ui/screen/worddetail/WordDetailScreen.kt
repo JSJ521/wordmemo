@@ -3,6 +3,7 @@ package com.wordmemo.app.ui.screen.worddetail
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,8 +23,7 @@ import com.wordmemo.app.domain.model.Word
 fun WordDetailScreen(
     wordId: Long,
     onNavigateBack: () -> Unit,
-    onNavigateToMnemonics: () -> Unit,
-    onNavigateToRelations: () -> Unit,
+    onNavigateToAiLearning: () -> Unit,
     onNavigateToGraph: () -> Unit,
     viewModel: WordDetailViewModel = viewModel()
 ) {
@@ -36,12 +36,15 @@ fun WordDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("单词详情") },
+                title = { Text("单词详情", style = MaterialTheme.typography.titleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
         }
     ) { padding ->
@@ -54,7 +57,9 @@ fun WordDetailScreen(
                     .fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text("单词未找到", color = Color.Gray)
+                Text("单词未找到",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             val word = uiState.word!!
@@ -67,36 +72,48 @@ fun WordDetailScreen(
                 // Word header
                 Text(
                     text = word.english,
-                    fontSize = 32.sp,
+                    style = MaterialTheme.typography.displayMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(Modifier.height(8.dp))
                 if (uiState.isTranslating) {
                     Text(
                         text = "AI 翻译中...",
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
+                } else if (uiState.translationError != null && word.chinese.contains("待补充")) {
+                    Text(
+                        text = uiState.translationError!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedButton(onClick = { viewModel.retryTranslate() }) {
+                        Text("重试翻译", style = MaterialTheme.typography.labelMedium)
+                    }
                 } else {
                     Text(
                         text = if (word.chinese.contains("待补充")) "正在获取释义"
                               else word.chinese,
-                        fontSize = 20.sp,
+                        style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
 
                 if (!word.note.isNullOrBlank()) {
                     Spacer(Modifier.height(16.dp))
-                    Text("备注", fontWeight = FontWeight.Medium, color = Color.Gray, fontSize = 12.sp)
-                    Text(word.note, fontSize = 16.sp)
+                    Text("备注", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium, 
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(word.note, style = MaterialTheme.typography.bodyMedium)
                 }
 
                 Spacer(Modifier.height(16.dp))
 
                 // 分组选择
                 if (uiState.allGroups.isNotEmpty()) {
-                    Text("分组", fontWeight = FontWeight.Medium, color = Color.Gray, fontSize = 12.sp)
+                    Text("分组", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium, 
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         uiState.allGroups.forEach { group ->
@@ -113,53 +130,27 @@ fun WordDetailScreen(
                     }
                 }
 
-                Spacer(Modifier.height(24.dp))
-                Text("添加时间", fontWeight = FontWeight.Medium, color = Color.Gray, fontSize = 12.sp)
-                Text(
-                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
-                        .format(java.util.Date(word.createdAt)),
-                    fontSize = 14.sp
-                )
-
-                Spacer(Modifier.height(24.dp))
-
-                // AI features
-                Text("AI 增强", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.weight(1f))
 
                 if (uiState.isOnline) {
                     Button(
-                        onClick = onNavigateToMnemonics,
+                        onClick = onNavigateToAiLearning,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("AI 助记 — 谐音/词根/故事联想")
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("AI 学习 — 助记 & 批量生成")
                     }
                     Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = onNavigateToRelations,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("关联图谱 — 同义词/近义词/搭配")
-                    }
-
-                    Button(
+                    FilledTonalButton(
                         onClick = onNavigateToGraph,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF))
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("单词图谱 — 网状关系")
                     }
                 } else {
-                    Button(
-                        onClick = {},
-                        enabled = false,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            disabledContainerColor = OfflineGray.copy(alpha = 0.3f)
-                        )
-                    ) {
-                        Text("AI 功能需要网络连接", color = OfflineGray)
-                    }
+                    Text("AI 功能需要网络连接", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
