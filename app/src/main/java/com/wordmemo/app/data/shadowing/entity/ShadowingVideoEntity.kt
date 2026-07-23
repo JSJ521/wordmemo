@@ -22,6 +22,8 @@ data class ShadowingVideoEntity(
     val filePath: String,
     @ColumnInfo(name = "cover_path")
     val coverPath: String? = null,
+    @ColumnInfo(name = "subtitle_path")
+    val subtitlePath: String? = null,
     @ColumnInfo(name = "duration_ms")
     val durationMs: Long,
     @ColumnInfo(name = "file_size_bytes")

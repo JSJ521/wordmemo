@@ -1,10 +1,13 @@
 package com.wordmemo.app.ui.screen.shadowing
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.wordmemo.app.data.shadowing.service.DownloadProgress
 import com.wordmemo.app.data.shadowing.service.DownloadStatus
+import com.wordmemo.app.data.shadowing.service.VideoImportService
 import com.wordmemo.app.domain.shadowing.model.ShadowingVideo
+import com.wordmemo.app.domain.shadowing.repository.ShadowingRepository
 import com.wordmemo.app.domain.shadowing.usecase.GetShadowingVideosUseCase
 import com.wordmemo.app.domain.shadowing.usecase.ImportVideoUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -26,14 +29,17 @@ data class ShadowingHomeUiState(
 sealed interface ShadowingHomeEvent {
     data object LoadVideos : ShadowingHomeEvent
     data class ImportBilibili(val url: String) : ShadowingHomeEvent
-    data object ImportLocalVideo : ShadowingHomeEvent
+    data class ImportLocalFile(val uri: Uri) : ShadowingHomeEvent
     data class DeleteVideo(val videoId: Long) : ShadowingHomeEvent
+    data object ClearError : ShadowingHomeEvent
 }
 
 @HiltViewModel
 class ShadowingHomeViewModel @Inject constructor(
     private val getShadowingVideosUseCase: GetShadowingVideosUseCase,
-    private val importVideoUseCase: ImportVideoUseCase
+    private val importVideoUseCase: ImportVideoUseCase,
+    private val videoImportService: VideoImportService,
+    private val shadowingRepository: ShadowingRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ShadowingHomeUiState())
@@ -41,14 +47,24 @@ class ShadowingHomeViewModel @Inject constructor(
 
     init {
         onEvent(ShadowingHomeEvent.LoadVideos)
+        observeDownloadProgress()
+    }
+
+    private fun observeDownloadProgress() {
+        viewModelScope.launch {
+            videoImportService.downloadProgress.collect { progress ->
+                _uiState.update { it.copy(downloadProgress = progress) }
+            }
+        }
     }
 
     fun onEvent(event: ShadowingHomeEvent) {
         when (event) {
             is ShadowingHomeEvent.LoadVideos -> loadVideos()
             is ShadowingHomeEvent.ImportBilibili -> importBilibili(event.url)
-            is ShadowingHomeEvent.ImportLocalVideo -> importLocalVideo()
+            is ShadowingHomeEvent.ImportLocalFile -> importLocalVideo(event.uri)
             is ShadowingHomeEvent.DeleteVideo -> deleteVideo(event.videoId)
+            is ShadowingHomeEvent.ClearError -> _uiState.update { it.copy(error = null) }
         }
     }
 
@@ -63,7 +79,7 @@ class ShadowingHomeViewModel @Inject constructor(
         }
     }
 
-    private fun importBilibili(url: String) {
+    fun importBilibili(url: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
             val result = importVideoUseCase(url)
@@ -73,12 +89,25 @@ class ShadowingHomeViewModel @Inject constructor(
         }
     }
 
-    private fun importLocalVideo() {
-        // 通过SAF文件选择器导入 — UI层处理Intent启动
-        _uiState.update { it.copy(error = null) }
+    private fun importLocalVideo(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(error = null, isLoading = true) }
+            val result = videoImportService.importLocalVideo(uri)
+            result.onSuccess {
+                _uiState.update { it.copy(isLoading = false) }
+            }.onFailure { e ->
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
     }
 
     private fun deleteVideo(videoId: Long) {
-        // 由UI层调用Repository
+        viewModelScope.launch {
+            try {
+                shadowingRepository.deleteVideo(videoId)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "删除失败: ${e.message}") }
+            }
+        }
     }
 }

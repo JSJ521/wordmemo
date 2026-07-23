@@ -29,4 +29,10 @@ interface ShadowingVideoDao {
 
     @Query("DELETE FROM shadowing_videos WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("UPDATE shadowing_videos SET duration_ms = :durationMs WHERE id = :videoId")
+    suspend fun updateDuration(videoId: Long, durationMs: Long)
+
+    @Query("UPDATE shadowing_videos SET subtitle_path = :subtitlePath WHERE id = :videoId")
+    suspend fun updateSubtitlePath(videoId: Long, subtitlePath: String)
 }

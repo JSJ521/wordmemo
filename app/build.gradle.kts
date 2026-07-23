@@ -114,7 +114,11 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.2.0")
 
     // yt-dlp Android wrapper (M1 B站视频下载)
-    implementation("com.github.yausername:youtubedl-android:latest.release")
+    val youtubedlAndroid = "0.18.1"
+    implementation("io.github.junkfood02.youtubedl-android:library:$youtubedlAndroid")
+
+    // ffmpeg Android wrapper (M1 视频处理)
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlAndroid")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")

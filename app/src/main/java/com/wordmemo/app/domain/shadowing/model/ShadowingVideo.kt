@@ -7,6 +7,7 @@ data class ShadowingVideo(
     val sourceUrl: String? = null,
     val filePath: String,
     val coverPath: String? = null,
+    val subtitlePath: String? = null,
     val durationMs: Long,
     val fileSizeBytes: Long? = null,
     val sentenceCount: Int = 0,

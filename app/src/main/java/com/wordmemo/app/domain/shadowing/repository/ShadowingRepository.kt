@@ -27,4 +27,10 @@ interface ShadowingRepository {
     suspend fun getRecordingsForSentence(sentenceId: Long): List<ShadowingRecord>
 
     suspend fun deleteRecording(recordId: Long)
+
+    suspend fun insertSentences(sentences: List<ShadowingSentence>)
+
+    suspend fun updateVideoDuration(videoId: Long, durationMs: Long)
+
+    suspend fun updateVideoSubtitlePath(videoId: Long, subtitlePath: String)
 }

@@ -4,6 +4,7 @@ import com.wordmemo.app.data.shadowing.dao.ShadowingRecordDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingSentenceDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingVideoDao
 import com.wordmemo.app.data.shadowing.entity.ShadowingRecordEntity
+import com.wordmemo.app.data.shadowing.entity.ShadowingSentenceEntity
 import com.wordmemo.app.data.shadowing.mapper.toDomain
 import com.wordmemo.app.data.shadowing.mapper.toEntity
 import com.wordmemo.app.domain.shadowing.model.ShadowingRecord
@@ -59,5 +60,17 @@ class ShadowingRepositoryImpl @Inject constructor(
 
     override suspend fun deleteRecording(recordId: Long) {
         recordDao.deleteById(recordId)
+    }
+
+    override suspend fun insertSentences(sentences: List<ShadowingSentence>) {
+        sentenceDao.insertBatch(sentences.map { it.toEntity() })
+    }
+
+    override suspend fun updateVideoDuration(videoId: Long, durationMs: Long) {
+        videoDao.updateDuration(videoId, durationMs)
+    }
+
+    override suspend fun updateVideoSubtitlePath(videoId: Long, subtitlePath: String) {
+        videoDao.updateSubtitlePath(videoId, subtitlePath)
     }
 }

@@ -1,14 +1,15 @@
 package com.wordmemo.app.ui.screen.shadowing
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,11 +21,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.wordmemo.app.data.shadowing.service.DownloadStatus
 import com.wordmemo.app.domain.shadowing.model.ShadowingVideo
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,6 +39,15 @@ fun ShadowingHomeScreen(
     var showImportSheet by remember { mutableStateOf(false) }
     var importBilibiliMode by remember { mutableStateOf(false) }
     var bilibiliUrl by remember { mutableStateOf("") }
+
+    // SAF file picker for local video import
+    val localFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.onEvent(ShadowingHomeEvent.ImportLocalFile(it))
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -129,7 +139,9 @@ fun ShadowingHomeScreen(
                         .align(Alignment.BottomCenter)
                         .padding(16.dp),
                     action = {
-                        TextButton(onClick = { /* dismiss */ }) {
+                        TextButton(onClick = {
+                            viewModel.onEvent(ShadowingHomeEvent.ClearError)
+                        }) {
                             Text("关闭")
                         }
                     }
@@ -140,7 +152,7 @@ fun ShadowingHomeScreen(
 
             // Download progress
             uiState.downloadProgress?.let { progress ->
-                if (progress.status.name == "DOWNLOADING") {
+                if (progress.status == DownloadStatus.DOWNLOADING) {
                     Card(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -207,10 +219,11 @@ fun ShadowingHomeScreen(
                     }
                 },
                 onImportLocal = {
-                    viewModel.onEvent(ShadowingHomeEvent.ImportLocalVideo)
                     showImportSheet = false
+                    // 打开 SAF 文件选择器，支持常见视频格式
+                    localFilePickerLauncher.launch(arrayOf("video/*", "application/octet-stream"))
                 },
-                isDownloading = uiState.downloadProgress?.status?.name == "DOWNLOADING"
+                isDownloading = uiState.downloadProgress?.status == DownloadStatus.DOWNLOADING
             )
         }
     }
