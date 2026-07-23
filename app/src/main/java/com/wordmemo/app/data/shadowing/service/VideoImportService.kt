@@ -830,6 +830,73 @@ class VideoImportService @Inject constructor(
         }
     }
 
+    /**
+     * 为已存在的视频重新上传/替换字幕文件。
+     *
+     * 流程：
+     * 1. 通过 SAF URI 复制字幕文件到视频所在目录
+     * 2. 解析字幕内容
+     * 3. 删除该视频下旧的句子数据
+     * 4. 保存新的句子数据
+     * 5. 更新视频记录的 subtitlePath 和 sentenceCount
+     *
+     * @param videoId 已有视频的 ID
+     * @param subtitleUri SAF 字幕文件 URI
+     * @return 更新后的视频实体
+     */
+    suspend fun reUploadSubtitle(videoId: Long, subtitleUri: Uri): Result<ShadowingVideoEntity> {
+        return try {
+            val video = shadowingVideoDao.getById(videoId)
+                ?: return Result.failure(VideoImportException.SubtitleParseException("视频不存在: $videoId"))
+
+            // 确定字幕文件存储路径（放在视频同级目录）
+            val videoFile = File(video.filePath)
+            val videoDir = videoFile.parentFile
+                ?: return Result.failure(VideoImportException.SubtitleParseException("无法获取视频所在目录"))
+
+            // 从 URI 判断扩展名
+            val subExt = when {
+                subtitleUri.toString().endsWith(".vtt", ignoreCase = true) -> "vtt"
+                else -> "srt"
+            }
+            val subFile = File(videoDir, "${videoFile.nameWithoutExtension}_manual.$subExt")
+
+            // 复制字幕文件
+            context.contentResolver.openInputStream(subtitleUri)?.use { input ->
+                FileOutputStream(subFile).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return Result.failure(VideoImportException.FileCopyException("无法读取字幕URI: $subtitleUri"))
+
+            // 解析字幕
+            val content = subFile.readText()
+            val entries = subtitleParser.detectAndParse(content, subFile.name)
+            if (entries.isEmpty()) {
+                subFile.delete()
+                return Result.failure(VideoImportException.SubtitleParseException("字幕文件解析失败，未找到有效字幕条目"))
+            }
+
+            // 删除旧的句子数据
+            shadowingSentenceDao.deleteByVideoId(videoId)
+
+            // 保存新的句子
+            val count = saveSentences(videoId, entries)
+
+            // 更新视频记录
+            shadowingVideoDao.updateSubtitlePath(videoId, subFile.absolutePath)
+            shadowingVideoDao.updateSentenceCount(videoId, count)
+
+            Log.i(TAG, "字幕重新上传成功: $count 句, 路径=${subFile.absolutePath}")
+            Result.success(shadowingVideoDao.getById(videoId) ?: video)
+        } catch (e: IOException) {
+            Result.failure(VideoImportException.FileCopyException("字幕文件复制失败: ${e.message}", e))
+        } catch (e: SecurityException) {
+            Result.failure(VideoImportException.FileCopyException("权限不足: ${e.message}", e))
+        } catch (e: Exception) {
+            Result.failure(VideoImportException.SubtitleParseException("字幕处理失败: ${e.message}", e))
+        }
+    }
+
     // ==================== 内部工具方法 ====================
 
     /**

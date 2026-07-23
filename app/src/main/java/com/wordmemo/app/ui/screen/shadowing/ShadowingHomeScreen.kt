@@ -40,13 +40,30 @@ fun ShadowingHomeScreen(
     var importBilibiliMode by remember { mutableStateOf(false) }
     var bilibiliUrl by remember { mutableStateOf("") }
     var videoToDelete by remember { mutableStateOf<ShadowingVideo?>(null) }
+    var pendingVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var showSubtitlePrompt by remember { mutableStateOf(false) }
 
     // SAF file picker for local video import
     val localFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
-            viewModel.onEvent(ShadowingHomeEvent.ImportLocalFile(it))
+            pendingVideoUri = it
+            showSubtitlePrompt = true  // 弹出字幕选择提示
+        }
+    }
+
+    // SAF file picker for subtitle file (triggered after video selection)
+    val subtitleFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { subtitleUri: Uri? ->
+        pendingVideoUri?.let { videoUri ->
+            if (subtitleUri != null) {
+                viewModel.onEvent(ShadowingHomeEvent.ImportLocalFileWithSubtitle(videoUri, subtitleUri))
+            } else {
+                viewModel.onEvent(ShadowingHomeEvent.ImportLocalFile(videoUri))
+            }
+            pendingVideoUri = null
         }
     }
 
@@ -256,6 +273,54 @@ fun ShadowingHomeScreen(
             dismissButton = {
                 TextButton(onClick = { videoToDelete = null }) {
                     Text("取消")
+                }
+            }
+        )
+    }
+
+    // 字幕选择提示对话框（选完视频后弹出）
+    if (showSubtitlePrompt) {
+        AlertDialog(
+            onDismissRequest = {
+                showSubtitlePrompt = false
+                pendingVideoUri?.let { uri ->
+                    viewModel.onEvent(ShadowingHomeEvent.ImportLocalFile(uri))
+                }
+                pendingVideoUri = null
+            },
+            shape = MaterialTheme.shapes.large,
+            title = {
+                Text("选择字幕文件", style = MaterialTheme.typography.titleMedium)
+            },
+            text = {
+                Text(
+                    "是否需要为视频选择对应的字幕文件（.srt / .vtt）？\n\n" +
+                            "如果跳过，系统将尝试自动提取内嵌字幕或通过语音识别生成。"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSubtitlePrompt = false
+                        subtitleFilePickerLauncher.launch(
+                            arrayOf("text/*", "application/x-subrip", "application/x-srt", "*/*")
+                        )
+                    }
+                ) {
+                    Text("选择字幕")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showSubtitlePrompt = false
+                        pendingVideoUri?.let { uri ->
+                            viewModel.onEvent(ShadowingHomeEvent.ImportLocalFile(uri))
+                        }
+                        pendingVideoUri = null
+                    }
+                ) {
+                    Text("跳过")
                 }
             }
         )

@@ -1,7 +1,9 @@
 package com.wordmemo.app.ui.screen.shadowing
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.wordmemo.app.data.shadowing.service.VideoImportService
 import com.wordmemo.app.domain.shadowing.model.ShadowingSentence
 import com.wordmemo.app.domain.shadowing.repository.ShadowingRepository
 import com.wordmemo.app.domain.shadowing.usecase.GetSentencesUseCase
@@ -30,6 +32,8 @@ data class ShadowingSessionUiState(
     val videoFilePath: String = "",
     val videoTitle: String = "",
     val videoDurationMs: Long = 0L,
+    val videoSubtitlePath: String? = null,
+    val currentVideoId: Long = -1L,
     val isPlayingVideo: Boolean = false,
     val currentPositionMs: Long = 0L,
     val playbackSpeed: Float = 1.0f,
@@ -49,7 +53,8 @@ data class ShadowingSessionUiState(
 @HiltViewModel
 class ShadowingSessionViewModel @Inject constructor(
     private val getSentencesUseCase: GetSentencesUseCase,
-    private val shadowingRepository: ShadowingRepository
+    private val shadowingRepository: ShadowingRepository,
+    private val videoImportService: VideoImportService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ShadowingSessionUiState())
@@ -66,7 +71,9 @@ class ShadowingSessionViewModel @Inject constructor(
                     it.copy(
                         videoFilePath = video.filePath,
                         videoTitle = video.title,
-                        videoDurationMs = video.durationMs
+                        videoDurationMs = video.durationMs,
+                        videoSubtitlePath = video.subtitlePath,
+                        currentVideoId = video.id
                     )
                 }
             }
@@ -85,6 +92,32 @@ class ShadowingSessionViewModel @Inject constructor(
                         )
                     }
                 }
+        }
+    }
+
+    /**
+     * 重新上传字幕文件（当视频无字幕或用户想替换字幕时）。
+     * 解析成功后自动重新加载句子列表。
+     */
+    fun reUploadSubtitle(subtitleUri: Uri) {
+        val videoId = _uiState.value.currentVideoId
+        if (videoId < 0) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            val result = videoImportService.reUploadSubtitle(videoId, subtitleUri)
+            result.onSuccess { updatedVideo ->
+                _uiState.update {
+                    it.copy(
+                        videoSubtitlePath = updatedVideo.subtitlePath,
+                        isLoading = false
+                    )
+                }
+                // 重新加载句子
+                loadSentences(videoId)
+            }.onFailure { e ->
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
         }
     }
 

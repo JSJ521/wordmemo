@@ -35,4 +35,7 @@ interface ShadowingVideoDao {
 
     @Query("UPDATE shadowing_videos SET subtitle_path = :subtitlePath WHERE id = :videoId")
     suspend fun updateSubtitlePath(videoId: Long, subtitlePath: String)
+
+    @Query("UPDATE shadowing_videos SET sentence_count = :count WHERE id = :videoId")
+    suspend fun updateSentenceCount(videoId: Long, count: Int)
 }

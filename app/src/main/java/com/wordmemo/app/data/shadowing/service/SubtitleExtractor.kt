@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.yausername.ffmpeg.FFmpeg
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -25,6 +27,9 @@ class SubtitleExtractor @Inject constructor(
 ) {
     private val TAG = "SubtitleExtractor"
 
+    /** FFmpeg 二进制是否已初始化（init 解压） */
+    private var initialized = false
+
     /** 外部传参，用于单元测试注入替代路径 */
     private var _ffmpegDir: File? = null
 
@@ -44,6 +49,31 @@ class SubtitleExtractor @Inject constructor(
     private val ffprobePath: String
         get() = File(ffmpegDir, "ffprobe").absolutePath
 
+    // ----- 初始化 ------------------------------------------------
+
+    /**
+     * 确保 FFmpeg 二进制已解压就绪。
+     *
+     * 调用 [FFmpeg.getInstance().init] 将内嵌的 `libffmpeg.zip.so`
+     * 解压到 [context.noBackupFilesDir]/youtubedl-android/packages/ffmpeg/，
+     * 之后 [ffmpegPath] 才指向有效的可执行文件。
+     *
+     * 线程安全——重复调用仅执行一次。
+     */
+    private suspend fun ensureInitialized() {
+        if (initialized) return
+        withContext(Dispatchers.IO) {
+            try {
+                FFmpeg.getInstance().init(context)
+                initialized = true
+                Log.i(TAG, "FFmpeg 初始化成功，binDir=${ffmpegDir.absolutePath}")
+            } catch (e: Exception) {
+                Log.e(TAG, "FFmpeg 初始化失败: ${e.message}", e)
+                throw e
+            }
+        }
+    }
+
     // ----- 内部测试辅助 ------------------------------------------
 
     /** 仅测试用：替换 ffmpeg 目录路径 */
@@ -61,6 +91,7 @@ class SubtitleExtractor @Inject constructor(
      */
     suspend fun hasSubtitleTrack(videoPath: String): Boolean {
         return try {
+            ensureInitialized()
             // 优先尝试 ffprobe（更快、更准确）
             if (File(ffprobePath).exists()) {
                 val result = execCommand(
@@ -96,6 +127,7 @@ class SubtitleExtractor @Inject constructor(
      */
     suspend fun extractSubtitle(videoPath: String, outputPath: String): Result<String> {
         return try {
+            ensureInitialized()
             val outputFile = File(outputPath)
             // 确保父目录存在
             outputFile.parentFile?.mkdirs()
@@ -147,6 +179,7 @@ class SubtitleExtractor @Inject constructor(
      */
     suspend fun extractAudio(videoPath: String, outputPath: String): Result<String> {
         return try {
+            ensureInitialized()
             val outputFile = File(outputPath)
             outputFile.parentFile?.mkdirs()
 
@@ -205,6 +238,7 @@ class SubtitleExtractor @Inject constructor(
      */
     suspend fun listSubtitleStreams(videoPath: String): List<SubtitleStreamInfo> {
         return try {
+            ensureInitialized()
             // 优先 ffprobe
             if (File(ffprobePath).exists()) {
                 val raw = execCommand(

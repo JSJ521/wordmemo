@@ -1,6 +1,8 @@
 package com.wordmemo.app.ui.screen.shadowing
 
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
@@ -51,6 +53,15 @@ fun ShadowingSessionScreen(
     var showSentenceListSheet by remember { mutableStateOf(false) }
     var showSpeedPicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // Subtitle file picker for re-uploading subtitles
+    val subtitleFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.reUploadSubtitle(it)
+        }
+    }
 
     // 加载指定视频的句子数据
     LaunchedEffect(videoId) {
@@ -192,18 +203,10 @@ fun ShadowingSessionScreen(
                 CircularProgressIndicator()
             }
         } else if (uiState.sentences.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "暂无句子数据",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            EmptySentencesState(
+                subtitlePath = uiState.videoSubtitlePath,
+                onSelectSubtitleFile = { subtitleFilePickerLauncher.launch(arrayOf("text/*", "application/x-subrip", "application/x-srt", "*/*")) }
+            )
         } else {
             Column(
                 modifier = Modifier
@@ -341,6 +344,156 @@ fun ShadowingSessionScreen(
                     Text("取消")
                 }
             }
+        )
+    }
+}
+
+// ==================== Empty Sentences State ====================
+
+@Composable
+private fun EmptySentencesState(
+    subtitlePath: String?,
+    onSelectSubtitleFile: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Subtitles,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+            )
+
+            Text(
+                text = "暂无句子数据",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            if (subtitlePath == null) {
+                // 无字幕文件 → 提示用户原因和解决方式
+                Text(
+                    text = "此视频没有可用的字幕内容。\n" +
+                            "可能的原因：",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ReasonRow(icon = Icons.Default.VideoFile, text = "视频文件本身未包含内嵌字幕轨道")
+                    ReasonRow(icon = Icons.Default.Settings, text = "未配置语音识别（Whisper API），无法自动生成字幕")
+                }
+
+                Text(
+                    text = "请通过以下方式获取字幕：",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    StepRow(number = "①", text = "点击下方按钮，选择已有 .srt / .vtt 字幕文件")
+                    StepRow(
+                        number = "②",
+                        text = "或在设置页配置 Whisper API 密钥后重新导入视频" +
+                                "\n（自动生成字幕）"
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // 选择字幕文件按钮
+                FilledTonalButton(
+                    onClick = onSelectSubtitleFile,
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.UploadFile,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("选择字幕文件")
+                }
+            } else {
+                // 有 subtitlePath 但句子数为 0（字幕解析中 / 异常）
+                Text(
+                    text = "字幕文件存在但解析未能提取到有效句子，\n" +
+                            "请尝试重新选择字幕文件。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedButton(onClick = onSelectSubtitleFile) {
+                    Icon(
+                        Icons.Default.UploadFile,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("重新选择字幕文件")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReasonRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+        )
+    }
+}
+
+@Composable
+private fun StepRow(number: String, text: String) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = number,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
