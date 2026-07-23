@@ -2,6 +2,8 @@ package com.wordmemo.app.data.shadowing.service
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
+import com.wordmemo.app.data.local.dao.AppConfigDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingSentenceDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingVideoDao
 import com.wordmemo.app.data.shadowing.entity.ShadowingSentenceEntity
@@ -45,14 +47,35 @@ sealed class VideoImportException(message: String, cause: Throwable? = null) : E
     class FileCopyException(message: String, cause: Throwable? = null) : VideoImportException(message, cause)
     class UnsupportedFormatException(message: String) : VideoImportException(message)
     class SubtitleParseException(message: String, cause: Throwable? = null) : VideoImportException(message, cause)
+    class AsrNotAvailableException(message: String) : VideoImportException(message)
+    class AsrConfigurationException(message: String) : VideoImportException(message)
+}
+
+/**
+ * 字幕获取策略——描述此次导入使用了哪种方式获取字幕
+ */
+enum class SubtitleSource {
+    /** 用户提供的外挂字幕文件 */
+    EXTERNAL,
+    /** 视频内嵌字幕轨道 */
+    EMBEDDED,
+    /** ASR 语音识别生成 */
+    ASR_GENERATED,
+    /** 没有任何可用字幕 */
+    NONE
 }
 
 @Singleton
 class VideoImportService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val shadowingVideoDao: ShadowingVideoDao,
-    private val shadowingSentenceDao: ShadowingSentenceDao
+    private val shadowingSentenceDao: ShadowingSentenceDao,
+    private val subtitleExtractor: SubtitleExtractor,
+    private val subtitleGenerator: SubtitleGenerator,
+    private val appConfigDao: AppConfigDao
 ) {
+    private val TAG = "VideoImportService"
+
     private val _downloadProgress = MutableStateFlow(DownloadProgress())
     val downloadProgress: Flow<DownloadProgress> = _downloadProgress.asStateFlow()
 
@@ -62,6 +85,8 @@ class VideoImportService @Inject constructor(
         get() = File(context.filesDir, "shadowing_videos").also { it.mkdirs() }
 
     private var currentProcessId: String? = null
+
+    // ==================== 公开 API ====================
 
     /**
      * 从B站URL下载视频
@@ -104,7 +129,7 @@ class VideoImportService @Inject constructor(
                 addOption("-o", "${videoDir.absolutePath}/%(title)s.%(ext)s")
                 addOption("--no-mtime")
                 addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
-                // 下载字幕
+                // 下载外挂字幕（yt-dlp 从 B站等网站抓取）
                 addOption("--write-subs")
                 addOption("--write-auto-subs")
                 addOption("--sub-lang", "zh-Hans,en,zh")
@@ -135,63 +160,40 @@ class VideoImportService @Inject constructor(
 
             currentProcessId = null
 
-            // 查找下载的视频文件和字幕文件
+            // 查找下载的视频文件
             val videoFile = videoDir.listFiles()?.find { file ->
                 file.isFile && file.extension in listOf("mp4", "mkv", "webm", "avi", "mov")
             } ?: throw VideoImportException.VideoDownloadException("未找到下载的视频文件")
 
             val videoTitle = videoFile.nameWithoutExtension
 
-            // 查找字幕文件
-            val subtitleFile = videoDir.listFiles()?.find { file ->
-                file.isFile && file.extension in listOf("srt", "vtt")
-            }
-
-            // 创建视频实体
+            // 创建视频实体（先插入，获取 videoId）
             val entity = ShadowingVideoEntity(
                 title = videoTitle,
                 sourceType = "bilibili",
                 sourceUrl = url,
                 filePath = videoFile.absolutePath,
-                subtitlePath = subtitleFile?.absolutePath,
-                durationMs = 0L, // 后续通过 ffmpeg 或播放器获取，初始为0
+                subtitlePath = null,
+                durationMs = 0L,
                 fileSizeBytes = videoFile.length()
             )
             val videoId = shadowingVideoDao.insert(entity)
 
-            // 解析字幕并保存句子
-            if (subtitleFile != null) {
-                try {
-                    val subtitleContent = subtitleFile.readText()
-                    val entries = subtitleParser.detectAndParse(subtitleContent, subtitleFile.name)
+            // ---- 字幕获取管线 ----
+            val subtitleResult = acquireSubtitles(
+                videoFile = videoFile,
+                videoId = videoId,
+                subtitleDir = videoDir,
+                externalSubtitleFile = findExternalSubtitle(videoDir)
+            )
 
-                    if (entries.isNotEmpty()) {
-                        val sentences = entries.mapIndexed { index, entry ->
-                            ShadowingSentenceEntity(
-                                videoId = videoId,
-                                sentenceIndex = index,
-                                text = entry.text,
-                                startTimeMs = entry.startTimeMs,
-                                endTimeMs = entry.endTimeMs,
-                                isMerged = false
-                            )
-                        }
-                        shadowingSentenceDao.insertBatch(sentences)
-
-                        // 更新视频的句子计数
-                        shadowingVideoDao.update(videoId.let {
-                            entity.copy(
-                                id = it,
-                                sentenceCount = sentences.size,
-                                subtitlePath = subtitleFile.absolutePath
-                            )
-                        })
-                    }
-                } catch (e: Exception) {
-                    // 字幕解析失败不影响视频下载，但记录异常
-                    // 使用 updateSubtitlePath 后续再试
-                }
-            }
+            // 更新视频信息
+            val updatedEntity = entity.copy(
+                id = videoId,
+                subtitlePath = subtitleResult.subtitlePath,
+                sentenceCount = subtitleResult.sentenceCount
+            )
+            shadowingVideoDao.update(updatedEntity)
 
             _downloadProgress.value = DownloadProgress(
                 videoId = videoId,
@@ -199,7 +201,7 @@ class VideoImportService @Inject constructor(
                 percentage = 100
             )
 
-            Result.success(shadowingVideoDao.getById(videoId) ?: entity.copy(id = videoId))
+            Result.success(shadowingVideoDao.getById(videoId) ?: updatedEntity)
         } catch (e: YoutubeDLException) {
             _downloadProgress.value = DownloadProgress(status = DownloadStatus.FAILED)
             Result.failure(VideoImportException.VideoDownloadException("yt-dlp下载失败: ${e.message}", e))
@@ -228,8 +230,11 @@ class VideoImportService @Inject constructor(
                 else -> "mp4"
             }
 
-            val fileName = "local_${System.currentTimeMillis()}.$ext"
-            val file = File(shadowingDir, fileName)
+            val videoDir = File(shadowingDir, "local_${System.currentTimeMillis()}")
+            videoDir.mkdirs()
+
+            val fileName = "video.$ext"
+            val file = File(videoDir, fileName)
 
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(file).use { output ->
@@ -237,70 +242,54 @@ class VideoImportService @Inject constructor(
                 }
             } ?: return Result.failure(VideoImportException.FileCopyException("无法读取URI: $uri"))
 
-            // 复制字幕（如果有）
-            var subtitlePath: String? = null
+            // 复制外挂字幕（如果有）
+            var externalSubtitleFile: File? = null
             if (subtitleUri != null) {
                 val subExt = when {
                     subtitleUri.toString().endsWith(".vtt", ignoreCase = true) -> "vtt"
                     else -> "srt"
                 }
-                val subFile = File(shadowingDir, "${file.nameWithoutExtension}.$subExt")
+                val subFile = File(videoDir, "${file.nameWithoutExtension}.$subExt")
                 try {
                     context.contentResolver.openInputStream(subtitleUri)?.use { input ->
                         FileOutputStream(subFile).use { output ->
                             input.copyTo(output)
                         }
                     }
-                    subtitlePath = subFile.absolutePath
+                    externalSubtitleFile = subFile
                 } catch (e: Exception) {
-                    // 字幕复制失败不影响视频导入
+                    Log.w(TAG, "外挂字幕复制失败: ${e.message}")
                 }
             }
 
+            // 创建视频实体
             val entity = ShadowingVideoEntity(
                 title = file.nameWithoutExtension,
                 sourceType = "local",
                 filePath = file.absolutePath,
-                subtitlePath = subtitlePath,
-                durationMs = 0L, // 后续通过 ffmpeg 或播放器获取
+                subtitlePath = null,
+                durationMs = 0L,
                 fileSizeBytes = file.length()
             )
             val videoId = shadowingVideoDao.insert(entity)
 
-            // 解析字幕并保存句子
-            if (subtitlePath != null) {
-                try {
-                    val subFile = File(subtitlePath)
-                    val subtitleContent = subFile.readText()
-                    val entries = subtitleParser.detectAndParse(subtitleContent, subFile.name)
+            // ---- 字幕获取管线 ----
+            val subtitleResult = acquireSubtitles(
+                videoFile = file,
+                videoId = videoId,
+                subtitleDir = videoDir,
+                externalSubtitleFile = externalSubtitleFile
+            )
 
-                    if (entries.isNotEmpty()) {
-                        val sentences = entries.mapIndexed { index, entry ->
-                            ShadowingSentenceEntity(
-                                videoId = videoId,
-                                sentenceIndex = index,
-                                text = entry.text,
-                                startTimeMs = entry.startTimeMs,
-                                endTimeMs = entry.endTimeMs,
-                                isMerged = false
-                            )
-                        }
-                        shadowingSentenceDao.insertBatch(sentences)
+            // 更新视频信息
+            val updatedEntity = entity.copy(
+                id = videoId,
+                subtitlePath = subtitleResult.subtitlePath,
+                sentenceCount = subtitleResult.sentenceCount
+            )
+            shadowingVideoDao.update(updatedEntity)
 
-                        shadowingVideoDao.update(videoId.let {
-                            entity.copy(
-                                id = it,
-                                sentenceCount = sentences.size,
-                                subtitlePath = subtitlePath
-                            )
-                        })
-                    }
-                } catch (e: Exception) {
-                    // 字幕解析失败不影响导入
-                }
-            }
-
-            Result.success(shadowingVideoDao.getById(videoId) ?: entity.copy(id = videoId))
+            Result.success(shadowingVideoDao.getById(videoId) ?: updatedEntity)
         } catch (e: IOException) {
             Result.failure(VideoImportException.FileCopyException("文件复制失败: ${e.message}", e))
         } catch (e: SecurityException) {
@@ -327,5 +316,223 @@ class VideoImportService @Inject constructor(
     fun cancelDownload(videoId: Long) {
         cancelDownload()
         _downloadProgress.value = DownloadProgress(videoId = videoId, status = DownloadStatus.IDLE)
+    }
+
+    // ==================== 字幕获取管线 ====================
+
+    /**
+     * 字幕获取结果
+     */
+    data class SubtitleAcquireResult(
+        /** 最终字幕文件路径（null 表示无字幕） */
+        val subtitlePath: String?,
+        /** 句子数量 */
+        val sentenceCount: Int,
+        /** 字幕来源 */
+        val source: SubtitleSource
+    )
+
+    /**
+     * 字幕获取管线——按优先级依次尝试：
+     *
+     * 1. [externalSubtitleFile] 外挂字幕 → 解析入库
+     * 2. [SubtitleExtractor] 内嵌字幕 → 提取为SRT → 解析入库
+     * 3. [SubtitleGenerator] ASR生成  → SRT入库
+     * 4. 全部失败 → subtitlePath = null（标记"需手动配字幕"）
+     */
+    private suspend fun acquireSubtitles(
+        videoFile: File,
+        videoId: Long,
+        subtitleDir: File,
+        externalSubtitleFile: File?
+    ): SubtitleAcquireResult {
+        // ---- 第1步：外挂字幕 ----
+        if (externalSubtitleFile != null && externalSubtitleFile.exists()) {
+            Log.i(TAG, "尝试外挂字幕: ${externalSubtitleFile.name}")
+            try {
+                val content = externalSubtitleFile.readText()
+                val entries = subtitleParser.detectAndParse(content, externalSubtitleFile.name)
+                if (entries.isNotEmpty()) {
+                    val count = saveSentences(videoId, entries)
+                    Log.i(TAG, "外挂字幕解析成功: $count 句")
+                    return SubtitleAcquireResult(
+                        subtitlePath = externalSubtitleFile.absolutePath,
+                        sentenceCount = count,
+                        source = SubtitleSource.EXTERNAL
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "外挂字幕解析失败: ${e.message}")
+            }
+        }
+
+        // ---- 第2步：内嵌字幕 ----
+        Log.i(TAG, "尝试提取内嵌字幕: ${videoFile.name}")
+        try {
+            val hasTrack = subtitleExtractor.hasSubtitleTrack(videoFile.absolutePath)
+            if (hasTrack) {
+                val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_embedded.srt")
+                val extractResult = subtitleExtractor.extractSubtitle(
+                    videoPath = videoFile.absolutePath,
+                    outputPath = srtFile.absolutePath
+                )
+                if (extractResult.isSuccess && srtFile.exists() && srtFile.length() > 0) {
+                    val content = srtFile.readText()
+                    val entries = subtitleParser.parseSrt(content)
+                    if (entries.isNotEmpty()) {
+                        val count = saveSentences(videoId, entries)
+                        Log.i(TAG, "内嵌字幕提取成功: $count 句")
+                        return SubtitleAcquireResult(
+                            subtitlePath = srtFile.absolutePath,
+                            sentenceCount = count,
+                            source = SubtitleSource.EMBEDDED
+                        )
+                    }
+                }
+            } else {
+                Log.i(TAG, "视频无内嵌字幕轨道")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "内嵌字幕提取失败: ${e.message}")
+        }
+
+        // ---- 第3步：ASR 生成 ----
+        Log.i(TAG, "尝试 ASR 生成字幕")
+        try {
+            val asrResult = tryGenerateAsrSubtitle(videoFile, subtitleDir)
+            if (asrResult.isSuccess && asrResult.getOrNull() != null) {
+                val asrPath = asrResult.getOrNull()!!
+                val srtFile = File(asrPath)
+                if (srtFile.exists() && srtFile.length() > 0) {
+                    val content = srtFile.readText()
+                    val entries = subtitleParser.parseSrt(content)
+                    if (entries.isNotEmpty()) {
+                        val count = saveSentences(videoId, entries)
+                        Log.i(TAG, "ASR 字幕生成成功: $count 句")
+                        return SubtitleAcquireResult(
+                            subtitlePath = srtFile.absolutePath,
+                            sentenceCount = count,
+                            source = SubtitleSource.ASR_GENERATED
+                        )
+                    }
+                }
+            } else {
+                val err = asrResult.exceptionOrNull()
+                if (err is VideoImportException.AsrConfigurationException) {
+                    Log.w(TAG, "ASR 未配置: ${err.message}")
+                } else {
+                    Log.w(TAG, "ASR 生成失败: ${err?.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "ASR 生成异常: ${e.message}")
+        }
+
+        // ---- 第4步：全部失败 ----
+        Log.i(TAG, "所有字幕获取方式均失败，视频 $videoId 无可用字幕")
+        return SubtitleAcquireResult(
+            subtitlePath = null,
+            sentenceCount = 0,
+            source = SubtitleSource.NONE
+        )
+    }
+
+    /**
+     * 尝试 ASR 字幕生成。
+     * 如果 ASR 未配置，返回清晰的失败信息。
+     */
+    private suspend fun tryGenerateAsrSubtitle(
+        videoFile: File,
+        subtitleDir: File
+    ): Result<String> {
+        return withContext(Dispatchers.IO) {
+            // 读取 ASR 配置
+            val asrBaseUrl = try {
+                appConfigDao.getValue(SubtitleGenerator.CONFIG_ASR_BASE_URL)
+                    ?.value?.ifBlank { null }
+            } catch (_: Exception) { null }
+
+            val asrApiKey = try {
+                appConfigDao.getValue(SubtitleGenerator.CONFIG_ASR_API_KEY)
+                    ?.value?.ifBlank { null }
+            } catch (_: Exception) { null }
+
+            if (asrBaseUrl == null || asrApiKey == null) {
+                return@withContext Result.failure(
+                    VideoImportException.AsrConfigurationException(
+                        "ASR 未配置。请提供 OpenAI Whisper 兼容 API 的地址和密钥。\n" +
+                            "配置方式：设置页 → ASR 服务地址 + ASR API Key\n" +
+                            "或自行准备 .srt 字幕文件导入。"
+                    )
+                )
+            }
+
+            // 提取音频
+            val audioFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_audio.wav")
+            val audioResult = subtitleExtractor.extractAudio(
+                videoPath = videoFile.absolutePath,
+                outputPath = audioFile.absolutePath
+            )
+
+            if (audioResult.isFailure) {
+                // 尝试 MP3
+                val mp3File = File(subtitleDir, "${videoFile.nameWithoutExtension}_audio.mp3")
+                val mp3Result = subtitleExtractor.extractAudio(
+                    videoPath = videoFile.absolutePath,
+                    outputPath = mp3File.absolutePath
+                )
+                if (mp3Result.isFailure) {
+                    return@withContext Result.failure(
+                        IOException("音频提取失败: ${audioResult.exceptionOrNull()?.message}")
+                    )
+                }
+                // 用 MP3 生成字幕
+                val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_asr.srt")
+                return@withContext subtitleGenerator.generateSubtitle(
+                    audioPath = mp3File.absolutePath,
+                    outputPath = srtFile.absolutePath,
+                    asrBaseUrl = asrBaseUrl,
+                    asrApiKey = asrApiKey
+                )
+            }
+
+            // 用 WAV 生成字幕
+            val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_asr.srt")
+            subtitleGenerator.generateSubtitle(
+                audioPath = audioFile.absolutePath,
+                outputPath = srtFile.absolutePath,
+                asrBaseUrl = asrBaseUrl,
+                asrApiKey = asrApiKey
+            )
+        }
+    }
+
+    // ==================== 内部工具方法 ====================
+
+    /**
+     * 在下载目录中查找 yt-dlp 下载的外挂字幕文件
+     */
+    private fun findExternalSubtitle(dir: File): File? {
+        return dir.listFiles()?.find { file ->
+            file.isFile && file.extension in listOf("srt", "vtt")
+        }
+    }
+
+    /**
+     * 保存解析后的字幕条目到数据库
+     */
+    private suspend fun saveSentences(videoId: Long, entries: List<SubtitleEntry>): Int {
+        val sentences = entries.mapIndexed { index, entry ->
+            ShadowingSentenceEntity(
+                videoId = videoId,
+                sentenceIndex = index,
+                text = entry.text,
+                startTimeMs = entry.startTimeMs,
+                endTimeMs = entry.endTimeMs,
+                isMerged = false
+            )
+        }
+        shadowingSentenceDao.insertBatch(sentences)
+        return sentences.size
     }
 }
