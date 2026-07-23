@@ -211,6 +211,85 @@ fun SettingsScreen(
                 }
                 }
 
+                // ── Cookie 配置 ──
+            SettingsSection(icon = Icons.Default.Info, title = "视频下载 Cookie") {
+                Text("配置 B站 / YouTube 的登录 Cookie，解锁登录视频和年龄限制视频的下载。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                Spacer(Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = uiState.bilibiliCookie,
+                    onValueChange = { viewModel.onBilibiliCookieChanged(it) },
+                    label = { Text("B站 Cookie") },
+                    placeholder = { Text("粘贴B站 cookies.txt 内容") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 8,
+                    shape = MaterialTheme.shapes.small
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = uiState.youtubeCookie,
+                    onValueChange = { viewModel.onYoutubeCookieChanged(it) },
+                    label = { Text("YouTube Cookie") },
+                    placeholder = { Text("粘贴YouTube cookies.txt 内容") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 8,
+                    shape = MaterialTheme.shapes.small
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "如何获取cookie：\n" +
+                            "1. 电脑浏览器登录B站/YouTube\n" +
+                            "2. 安装 Get cookies.txt 扩展\n" +
+                            "3. 导出cookie粘贴到上方",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Button(
+                    onClick = { viewModel.saveCookieConfig() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.small
+                ) { Text("保存 Cookie") }
+
+                if (uiState.connectionTestResult != null && uiState.connectionTestResult!!.contains("Cookie")) {
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(uiState.connectionTestResult!!,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+
                 // ── 数据管理 ──
             SettingsSection(icon = Icons.Default.Storage, title = "数据管理") {
                 val ctx = LocalContext.current

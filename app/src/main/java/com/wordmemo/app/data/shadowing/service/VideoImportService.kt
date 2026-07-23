@@ -65,6 +65,15 @@ enum class SubtitleSource {
     NONE
 }
 
+/**
+ * URL 类型枚举——由 [VideoImportService.detectUrlType] 返回
+ */
+enum class UrlType {
+    BILIBILI,
+    YOUTUBE,
+    OTHER
+}
+
 @Singleton
 class VideoImportService @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -72,7 +81,9 @@ class VideoImportService @Inject constructor(
     private val shadowingSentenceDao: ShadowingSentenceDao,
     private val subtitleExtractor: SubtitleExtractor,
     private val subtitleGenerator: SubtitleGenerator,
-    private val appConfigDao: AppConfigDao
+    private val appConfigDao: AppConfigDao,
+    private val bilibiliParser: BilibiliParser,
+    private val youTubeParser: YouTubeParser
 ) {
     private val TAG = "VideoImportService"
 
@@ -121,6 +132,9 @@ class VideoImportService @Inject constructor(
             val videoDir = File(shadowingDir, "bilibili_${System.currentTimeMillis()}")
             videoDir.mkdirs()
 
+            // 读取 B站 cookie 并写入临时文件
+            val bilibiliCookieFile = writeCookieFile("bilibili_cookies")
+
             val processId = UUID.randomUUID().toString()
             currentProcessId = processId
 
@@ -129,6 +143,10 @@ class VideoImportService @Inject constructor(
                 addOption("-o", "${videoDir.absolutePath}/%(title)s.%(ext)s")
                 addOption("--no-mtime")
                 addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
+                // 传递 cookie 解锁登录内容
+                bilibiliCookieFile?.let {
+                    addOption("--cookies", it.absolutePath)
+                }
                 // 下载外挂字幕（yt-dlp 从 B站等网站抓取）
                 addOption("--write-subs")
                 addOption("--write-auto-subs")
@@ -211,6 +229,311 @@ class VideoImportService @Inject constructor(
         } catch (e: Exception) {
             _downloadProgress.value = DownloadProgress(status = DownloadStatus.FAILED)
             Result.failure(VideoImportException.VideoDownloadException("下载失败: ${e.message}", e))
+        }
+    }
+
+    // ==================== 直接解析 API（无需 cookie/登录）====================
+
+    /**
+     * 检测 URL 类型。
+     *
+     * - B站链接（bilibili.com / b23.tv）→ [UrlType.BILIBILI]
+     * - YouTube链接（youtube.com / youtu.be）→ [UrlType.YOUTUBE]
+     * - 其他 → [UrlType.OTHER]
+     */
+    private fun detectUrlType(url: String): UrlType {
+        return when {
+            url.contains("bilibili.com") || url.contains("b23.tv") -> UrlType.BILIBILI
+            url.contains("youtube.com") || url.contains("youtu.be") -> UrlType.YOUTUBE
+            else -> UrlType.OTHER
+        }
+    }
+
+    /**
+     * 通过公开 API 直接下载视频（无需 cookie/登录），支持 B站 和 YouTube。
+     *
+     * 路由逻辑：
+     * - B站链接 → [BilibiliParser] 直接解析下载 + 字幕
+     * - YouTube 链接 → [YouTubeParser] 通过 Invidious 实例解析下载 + 字幕
+     * - 其他链接 → 回退到 yt-dlp（需 cookie 的站点由原有流程处理）
+     *
+     * @param url 视频链接
+     * @return 入库后的 [ShadowingVideoEntity]
+     */
+    suspend fun downloadFromUrl(url: String): Result<ShadowingVideoEntity> {
+        return when (detectUrlType(url)) {
+            UrlType.BILIBILI -> downloadBilibiliDirect(url)
+            UrlType.YOUTUBE -> downloadYouTubeDirect(url)
+            UrlType.OTHER -> downloadFromBilibili(url)  // 回退到 yt-dlp
+        }
+    }
+
+    /**
+     * 通过 [BilibiliParser] 直接下载 B站视频（无需 cookie）。
+     */
+    private suspend fun downloadBilibiliDirect(url: String): Result<ShadowingVideoEntity> {
+        return try {
+            // 处理 b23.tv 短链接
+            val resolvedUrl = if (url.contains("b23.tv")) {
+                val bvResult = bilibiliParser.resolveShortUrl(url)
+                if (bvResult.isSuccess) {
+                    "https://www.bilibili.com/video/${bvResult.getOrThrow()}"
+                } else {
+                    Log.w(TAG, "短链接解析失败，回退 yt-dlp: ${bvResult.exceptionOrNull()?.message}")
+                    return downloadFromBilibili(url)
+                }
+            } else {
+                url
+            }
+
+            _downloadProgress.value = DownloadProgress(
+                status = DownloadStatus.DOWNLOADING,
+                percentage = 0
+            )
+
+            // Step 1: 解析视频信息
+            val parseResult = bilibiliParser.parse(resolvedUrl)
+            if (parseResult.isFailure) {
+                val err = parseResult.exceptionOrNull()
+                Log.w(TAG, "BilibiliParser 解析失败: ${err?.message}，回退 yt-dlp")
+                return downloadFromBilibili(url)
+            }
+            val info = parseResult.getOrThrow()
+            _downloadProgress.value = DownloadProgress(
+                status = DownloadStatus.DOWNLOADING,
+                percentage = 10
+            )
+
+            // 创建输出目录
+            val videoDir = File(shadowingDir, "bilibili_direct_${System.currentTimeMillis()}")
+            videoDir.mkdirs()
+            val videoOutputPath = File(videoDir, "${sanitizeFileName(info.title)}.mp4").absolutePath
+
+            // Step 2: 下载视频
+            val downloadResult = bilibiliParser.downloadVideo(info, videoOutputPath)
+            if (downloadResult.isFailure) {
+                val err = downloadResult.exceptionOrNull()
+                Log.w(TAG, "BilibiliParser 下载失败: ${err?.message}，回退 yt-dlp")
+                return downloadFromBilibili(url)
+            }
+
+            _downloadProgress.value = DownloadProgress(
+                status = DownloadStatus.DOWNLOADING,
+                percentage = 70
+            )
+
+            val videoFile = File(videoOutputPath)
+            val videoTitle = sanitizeFileName(info.title)
+
+            // Step 3: 下载字幕
+            val subtitlePath = bilibiliParser.downloadSubtitle(
+                info,
+                File(videoDir, "${videoTitle}.srt").absolutePath
+            ).getOrNull()
+
+            _downloadProgress.value = DownloadProgress(
+                status = DownloadStatus.DOWNLOADING,
+                percentage = 85
+            )
+
+            // Step 4: 入库
+            val entity = ShadowingVideoEntity(
+                title = info.title,
+                sourceType = "bilibili",
+                sourceUrl = url,
+                filePath = videoFile.absolutePath,
+                subtitlePath = null,  // 先插入，字幕后面再关联
+                durationMs = info.durationSeconds * 1000,
+                fileSizeBytes = videoFile.length()
+            )
+            val videoId = shadowingVideoDao.insert(entity)
+
+            // Step 5: 处理字幕
+            var subtitleResult: SubtitleAcquireResult
+            if (subtitlePath != null) {
+                val subtitleFile = File(subtitlePath)
+                if (subtitleFile.exists() && subtitleFile.length() > 0) {
+                    try {
+                        val content = subtitleFile.readText()
+                        val entries = subtitleParser.detectAndParse(content, subtitleFile.name)
+                        if (entries.isNotEmpty()) {
+                            val count = saveSentences(videoId, entries)
+                            subtitleResult = SubtitleAcquireResult(
+                                subtitlePath = subtitleFile.absolutePath,
+                                sentenceCount = count,
+                                source = SubtitleSource.EXTERNAL
+                            )
+                        } else {
+                            subtitleResult = SubtitleAcquireResult(null, 0, SubtitleSource.NONE)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "字幕解析失败: ${e.message}")
+                        subtitleResult = SubtitleAcquireResult(null, 0, SubtitleSource.NONE)
+                    }
+                } else {
+                    subtitleResult = SubtitleAcquireResult(null, 0, SubtitleSource.NONE)
+                }
+            } else {
+                // 无 API 字幕，走原有字幕获取管线（尝试内嵌字幕/ASR）
+                subtitleResult = acquireSubtitles(
+                    videoFile = videoFile,
+                    videoId = videoId,
+                    subtitleDir = videoDir,
+                    externalSubtitleFile = null
+                )
+            }
+
+            // Step 6: 更新视频记录
+            val updatedEntity = entity.copy(
+                id = videoId,
+                subtitlePath = subtitleResult.subtitlePath,
+                sentenceCount = subtitleResult.sentenceCount
+            )
+            shadowingVideoDao.update(updatedEntity)
+
+            _downloadProgress.value = DownloadProgress(
+                videoId = videoId,
+                status = DownloadStatus.COMPLETED,
+                percentage = 100
+            )
+
+            Log.i(TAG, "B站直接下载完成: ${info.title} (${videoFile.length()} bytes)")
+            Result.success(shadowingVideoDao.getById(videoId) ?: updatedEntity)
+        } catch (e: VideoImportException) {
+            _downloadProgress.value = DownloadProgress(status = DownloadStatus.FAILED)
+            Result.failure(e)
+        } catch (e: Exception) {
+            Log.e(TAG, "B站直接下载异常: ${e.message}", e)
+            // 捕获所有异常后尝试回退到 yt-dlp
+            Log.w(TAG, "直接下载失败，回退 yt-dlp")
+            return downloadFromBilibili(url)
+        }
+    }
+
+    /**
+     * 通过 [YouTubeParser] 直接下载 YouTube 视频（无需 cookie/API key）。
+     */
+    private suspend fun downloadYouTubeDirect(url: String): Result<ShadowingVideoEntity> {
+        return try {
+            _downloadProgress.value = DownloadProgress(
+                status = DownloadStatus.DOWNLOADING,
+                percentage = 0
+            )
+
+            // Step 1: 解析视频信息（通过 Invidious 实例）
+            val parseResult = youTubeParser.parse(url)
+            if (parseResult.isFailure) {
+                val err = parseResult.exceptionOrNull()
+                Log.w(TAG, "YouTubeParser 解析失败: ${err?.message}，回退 yt-dlp")
+                return downloadFromBilibili(url)  // yt-dlp 也支持 YouTube
+            }
+            val info = parseResult.getOrThrow()
+            _downloadProgress.value = DownloadProgress(
+                status = DownloadStatus.DOWNLOADING,
+                percentage = 15
+            )
+
+            // 创建输出目录
+            val videoDir = File(shadowingDir, "youtube_direct_${System.currentTimeMillis()}")
+            videoDir.mkdirs()
+            val videoOutputPath = File(videoDir, "${sanitizeFileName(info.title)}.mp4").absolutePath
+
+            // Step 2: 下载视频
+            val downloadResult = youTubeParser.downloadVideo(info, videoOutputPath)
+            if (downloadResult.isFailure) {
+                val err = downloadResult.exceptionOrNull()
+                Log.w(TAG, "YouTubeParser 下载失败: ${err?.message}，回退 yt-dlp")
+                return downloadFromBilibili(url)
+            }
+
+            _downloadProgress.value = DownloadProgress(
+                status = DownloadStatus.DOWNLOADING,
+                percentage = 75
+            )
+
+            val videoFile = File(videoOutputPath)
+            val videoTitle = sanitizeFileName(info.title)
+
+            // Step 3: 下载字幕
+            val subtitlePath = youTubeParser.downloadSubtitle(
+                info,
+                File(videoDir, "${videoTitle}.srt").absolutePath
+            ).getOrNull()
+
+            _downloadProgress.value = DownloadProgress(
+                status = DownloadStatus.DOWNLOADING,
+                percentage = 85
+            )
+
+            // Step 4: 入库
+            val entity = ShadowingVideoEntity(
+                title = info.title,
+                sourceType = "youtube",
+                sourceUrl = url,
+                filePath = videoFile.absolutePath,
+                subtitlePath = null,
+                durationMs = info.durationSeconds * 1000,
+                fileSizeBytes = videoFile.length()
+            )
+            val videoId = shadowingVideoDao.insert(entity)
+
+            // Step 5: 处理字幕
+            var subtitleResult: SubtitleAcquireResult
+            if (subtitlePath != null) {
+                val subtitleFile = File(subtitlePath)
+                if (subtitleFile.exists() && subtitleFile.length() > 0) {
+                    try {
+                        val content = subtitleFile.readText()
+                        val entries = subtitleParser.detectAndParse(content, subtitleFile.name)
+                        if (entries.isNotEmpty()) {
+                            val count = saveSentences(videoId, entries)
+                            subtitleResult = SubtitleAcquireResult(
+                                subtitlePath = subtitleFile.absolutePath,
+                                sentenceCount = count,
+                                source = SubtitleSource.EXTERNAL
+                            )
+                        } else {
+                            subtitleResult = SubtitleAcquireResult(null, 0, SubtitleSource.NONE)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "字幕解析失败: ${e.message}")
+                        subtitleResult = SubtitleAcquireResult(null, 0, SubtitleSource.NONE)
+                    }
+                } else {
+                    subtitleResult = SubtitleAcquireResult(null, 0, SubtitleSource.NONE)
+                }
+            } else {
+                subtitleResult = acquireSubtitles(
+                    videoFile = videoFile,
+                    videoId = videoId,
+                    subtitleDir = videoDir,
+                    externalSubtitleFile = null
+                )
+            }
+
+            // Step 6: 更新视频记录
+            val updatedEntity = entity.copy(
+                id = videoId,
+                subtitlePath = subtitleResult.subtitlePath,
+                sentenceCount = subtitleResult.sentenceCount
+            )
+            shadowingVideoDao.update(updatedEntity)
+
+            _downloadProgress.value = DownloadProgress(
+                videoId = videoId,
+                status = DownloadStatus.COMPLETED,
+                percentage = 100
+            )
+
+            Log.i(TAG, "YouTube 直接下载完成: ${info.title} (${videoFile.length()} bytes)")
+            Result.success(shadowingVideoDao.getById(videoId) ?: updatedEntity)
+        } catch (e: VideoImportException) {
+            _downloadProgress.value = DownloadProgress(status = DownloadStatus.FAILED)
+            Result.failure(e)
+        } catch (e: Exception) {
+            Log.e(TAG, "YouTube 直接下载异常: ${e.message}", e)
+            Log.w(TAG, "直接下载失败，回退 yt-dlp")
+            return downloadFromBilibili(url)
         }
     }
 
@@ -534,5 +857,37 @@ class VideoImportService @Inject constructor(
         }
         shadowingSentenceDao.insertBatch(sentences)
         return sentences.size
+    }
+
+    /**
+     * 从 AppConfigDao 读取指定 key 的 cookie，写入临时文件供 yt-dlp 使用。
+     * 如果没有配置 cookie，返回 null。
+     */
+    private suspend fun writeCookieFile(configKey: String): File? {
+        return try {
+            val cookieStr = appConfigDao.getValue(configKey)?.value
+            if (cookieStr.isNullOrBlank()) {
+                null
+            } else {
+                val cookieFile = File(context.cacheDir, "${configKey}.txt")
+                cookieFile.writeText(cookieStr)
+                Log.i(TAG, "已写入 cookie 文件: ${cookieFile.absolutePath}")
+                cookieFile
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "写入 cookie 文件失败: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 清理文件名中的非法字符。
+     */
+    private fun sanitizeFileName(name: String): String {
+        return name
+            .replace(Regex("[/\\\\:*?\"<>|]"), "_")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(200)  // 限制长度
     }
 }

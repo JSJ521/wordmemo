@@ -11,7 +11,7 @@ class ImportVideoUseCase @Inject constructor(
     private val shadowingRepository: ShadowingRepository
 ) {
     suspend operator fun invoke(url: String): Result<ShadowingVideo> {
-        return videoImportService.downloadFromBilibili(url).map { entity ->
+        return videoImportService.downloadFromUrl(url).map { entity ->
             shadowingRepository.getVideoById(entity.id) ?: ShadowingVideo(
                 id = entity.id,
                 title = entity.title,

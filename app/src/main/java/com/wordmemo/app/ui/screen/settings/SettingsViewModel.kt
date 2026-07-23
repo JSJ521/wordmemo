@@ -28,6 +28,8 @@ data class SettingsUiState(
     val apiBaseUrl: String = "https://api.deepseek.com",
     val apiModel: String = "deepseek-chat",
     val dailyReviewLimit: Int = 13,
+    val bilibiliCookie: String = "",
+    val youtubeCookie: String = "",
     val connectionTestResult: String? = null,
     val isTestingConnection: Boolean = false,
     val exportResult: String? = null,
@@ -63,7 +65,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 apiKey = config.firstOrNull { it.key == "api_key" }?.let { cipher.decrypt(it.value) } ?: "",
                 apiBaseUrl = config.firstOrNull { it.key == "api_base_url" }?.value ?: "https://api.deepseek.com",
                 apiModel = config.firstOrNull { it.key == "api_model" }?.value ?: "deepseek-chat",
-                dailyReviewLimit = config.firstOrNull { it.key == "daily_review_limit" }?.value?.toIntOrNull() ?: 13
+                dailyReviewLimit = config.firstOrNull { it.key == "daily_review_limit" }?.value?.toIntOrNull() ?: 13,
+                bilibiliCookie = config.firstOrNull { it.key == "bilibili_cookies" }?.value ?: "",
+                youtubeCookie = config.firstOrNull { it.key == "youtube_cookies" }?.value ?: ""
             )
         } catch (_: Exception) {}
     }
@@ -103,6 +107,23 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         _uiState.value = _uiState.value.copy(dailyReviewLimit = limit)
         viewModelScope.launch {
             db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("daily_review_limit", limit.toString()))
+        }
+    }
+
+    fun onBilibiliCookieChanged(cookie: String) {
+        _uiState.value = _uiState.value.copy(bilibiliCookie = cookie)
+    }
+
+    fun onYoutubeCookieChanged(cookie: String) {
+        _uiState.value = _uiState.value.copy(youtubeCookie = cookie)
+    }
+
+    fun saveCookieConfig() {
+        viewModelScope.launch {
+            val state = _uiState.value
+            db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("bilibili_cookies", state.bilibiliCookie))
+            db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("youtube_cookies", state.youtubeCookie))
+            _uiState.value = state.copy(connectionTestResult = "✅ Cookie 已保存")
         }
     }
 
