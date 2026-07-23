@@ -1,5 +1,6 @@
 package com.wordmemo.app.data.shadowing.repository
 
+import android.content.Context
 import com.wordmemo.app.data.shadowing.dao.ShadowingRecordDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingSentenceDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingVideoDao
@@ -11,8 +12,10 @@ import com.wordmemo.app.domain.shadowing.model.ShadowingRecord
 import com.wordmemo.app.domain.shadowing.model.ShadowingSentence
 import com.wordmemo.app.domain.shadowing.model.ShadowingVideo
 import com.wordmemo.app.domain.shadowing.repository.ShadowingRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,7 +23,8 @@ import javax.inject.Singleton
 class ShadowingRepositoryImpl @Inject constructor(
     private val videoDao: ShadowingVideoDao,
     private val sentenceDao: ShadowingSentenceDao,
-    private val recordDao: ShadowingRecordDao
+    private val recordDao: ShadowingRecordDao,
+    @ApplicationContext private val context: Context
 ) : ShadowingRepository {
 
     override fun observeVideos(): Flow<List<ShadowingVideo>> =
@@ -30,7 +34,31 @@ class ShadowingRepositoryImpl @Inject constructor(
         videoDao.getById(videoId)?.toDomain()
 
     override suspend fun deleteVideo(videoId: Long) {
+        // 先获取视频信息，用于清理文件
+        val video = videoDao.getById(videoId)
+
+        // 级联删除：先删记录，再删句子
+        recordDao.deleteByVideoId(videoId)
+        sentenceDao.deleteByVideoId(videoId)
+
+        // 删除视频本身
         videoDao.deleteById(videoId)
+
+        // 清理磁盘上的文件
+        if (video != null) {
+            listOfNotNull(
+                video.filePath,
+                video.coverPath,
+                video.subtitlePath
+            ).forEach { filePath ->
+                try {
+                    val file = File(filePath)
+                    if (file.exists()) file.delete()
+                } catch (_: Exception) {
+                    // 忽略单个文件的删除异常，不影响主流程
+                }
+            }
+        }
     }
 
     override fun getSentencesForVideo(videoId: Long): Flow<List<ShadowingSentence>> =

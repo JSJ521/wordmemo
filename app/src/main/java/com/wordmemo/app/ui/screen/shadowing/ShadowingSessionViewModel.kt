@@ -117,8 +117,13 @@ class ShadowingSessionViewModel @Inject constructor(
 
     fun seekForward(seconds: Int = 10) {
         val current = _uiState.value.currentPositionMs
-        val newPos = (current + seconds * 1000L).coerceAtMost(_uiState.value.videoDurationMs)
-        seekTo(newPos)
+        val duration = _uiState.value.videoDurationMs
+        if (duration <= 0L) {
+            seekTo(current + seconds * 1000L)
+        } else {
+            val newPos = (current + seconds * 1000L).coerceAtMost(duration)
+            seekTo(newPos)
+        }
     }
 
     fun seekBackward(seconds: Int = 10) {

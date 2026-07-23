@@ -28,4 +28,7 @@ interface ShadowingRecordDao {
 
     @Query("DELETE FROM shadowing_records WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM shadowing_records WHERE video_id = :videoId")
+    suspend fun deleteByVideoId(videoId: Long)
 }

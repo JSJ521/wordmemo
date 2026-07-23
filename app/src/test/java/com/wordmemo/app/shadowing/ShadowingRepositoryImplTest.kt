@@ -42,7 +42,7 @@ class ShadowingRepositoryImplTest {
         videoDao = database.shadowingVideoDao()
         sentenceDao = database.shadowingSentenceDao()
         recordDao = database.shadowingRecordDao()
-        repository = ShadowingRepositoryImpl(videoDao, sentenceDao, recordDao)
+        repository = ShadowingRepositoryImpl(videoDao, sentenceDao, recordDao, context)
     }
 
     @After

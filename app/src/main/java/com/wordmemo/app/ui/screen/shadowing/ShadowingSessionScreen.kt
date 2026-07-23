@@ -52,6 +52,11 @@ fun ShadowingSessionScreen(
     var showSpeedPicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
+    // 加载指定视频的句子数据
+    LaunchedEffect(videoId) {
+        viewModel.loadSentences(videoId)
+    }
+
     // ExoPlayer lifecycle
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {

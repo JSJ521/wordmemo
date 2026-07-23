@@ -39,6 +39,7 @@ fun ShadowingHomeScreen(
     var showImportSheet by remember { mutableStateOf(false) }
     var importBilibiliMode by remember { mutableStateOf(false) }
     var bilibiliUrl by remember { mutableStateOf("") }
+    var videoToDelete by remember { mutableStateOf<ShadowingVideo?>(null) }
 
     // SAF file picker for local video import
     val localFilePickerLauncher = rememberLauncherForActivityResult(
@@ -126,7 +127,7 @@ fun ShadowingHomeScreen(
                         VideoCard(
                             video = video,
                             onClick = { onNavigateToSession(video.id) },
-                            onDelete = { viewModel.onEvent(ShadowingHomeEvent.DeleteVideo(video.id)) }
+                            onDelete = { videoToDelete = video }
                         )
                     }
                 }
@@ -226,6 +227,38 @@ fun ShadowingHomeScreen(
                 isDownloading = uiState.downloadProgress?.status == DownloadStatus.DOWNLOADING
             )
         }
+    }
+
+    // 删除确认对话框
+    videoToDelete?.let { video ->
+        AlertDialog(
+            onDismissRequest = { videoToDelete = null },
+            shape = MaterialTheme.shapes.large,
+            title = {
+                Text("删除视频", style = MaterialTheme.typography.titleMedium)
+            },
+            text = {
+                Text("确定要删除「${video.title}」吗？\n相关的句子和录音数据也将被删除。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.onEvent(ShadowingHomeEvent.DeleteVideo(video.id))
+                        videoToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { videoToDelete = null }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 

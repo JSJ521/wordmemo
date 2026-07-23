@@ -104,9 +104,13 @@ class ShadowingHomeViewModel @Inject constructor(
     private fun deleteVideo(videoId: Long) {
         viewModelScope.launch {
             try {
+                _uiState.update { it.copy(isLoading = true) }
                 shadowingRepository.deleteVideo(videoId)
+                // deleteVideo 之后不需要显式调用 loadVideos，因为 Room Flow 会自动发射新数据
+                // 但为了即时反馈，更新 isLoading
+                _uiState.update { it.copy(isLoading = false) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = "删除失败: ${e.message}") }
+                _uiState.update { it.copy(isLoading = false, error = "删除失败: ${e.message}") }
             }
         }
     }
