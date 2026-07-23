@@ -54,6 +54,8 @@ fun NavGraph(navController: NavHostController) {
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                 onNavigateToStats = { navController.navigate(Screen.Stats.route) },
                 onNavigateToOcr = { navController.navigate(Screen.Ocr.route) },
+                onNavigateToShadowing = { navController.navigate(Screen.ShadowingHome.route) },
+                onNavigateToAssessment = { navController.navigate(Screen.AssessmentHome.route) },
                 initialGroupId = groupId
             )
         }

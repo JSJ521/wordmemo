@@ -33,6 +33,8 @@ fun WordListScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToStats: () -> Unit,
     onNavigateToOcr: () -> Unit,
+    onNavigateToShadowing: () -> Unit,
+    onNavigateToAssessment: () -> Unit,
     initialGroupId: Long? = null,
     viewModel: WordListViewModel = hiltViewModel()
 ) {
@@ -97,6 +99,14 @@ fun WordListScreen(
                             showUtilityMenu = false
                             onNavigateToSettings()
                         }) { Icon(Icons.Default.Settings, contentDescription = "设置") }
+                        IconButton(onClick = {
+                            showUtilityMenu = false
+                            onNavigateToShadowing()
+                        }) { Icon(Icons.Default.Mic, contentDescription = "影子跟读") }
+                        IconButton(onClick = {
+                            showUtilityMenu = false
+                            onNavigateToAssessment()
+                        }) { Icon(Icons.Default.RateReview, contentDescription = "发音测评") }
                     }
                 }
             }
