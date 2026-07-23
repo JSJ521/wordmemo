@@ -53,7 +53,7 @@ import com.wordmemo.app.data.pronunciation.dao.PhonemeScoreDao
         AssessmentRecordEntity::class,
         PhonemeScoreEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class WordMemoDatabase : RoomDatabase() {
