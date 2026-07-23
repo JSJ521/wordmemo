@@ -1,0 +1,613 @@
+{
+  "title": "词鼠书记 WordMemo — 影子跟读 + 发音测评 UI 原型布局",
+  "version": "v1.0",
+  "updated": "2026-07-22",
+  "global_theme": {
+    "base": "Material3 Dark",
+    "color_scheme": {
+      "surface": "#1C1B1F",
+      "background": "#141218",
+      "primary": "#D0BCFF",
+      "on_primary": "#381E72",
+      "secondary": "#CCC2DC",
+      "surface_variant": "#2B2930",
+      "on_surface_variant": "#CAC4D0",
+      "error": "#F2B8B5",
+      "outline": "#938F99",
+      "scrim": "#000000"
+    },
+    "typography": {
+      "display": "Noto Sans SC / Roboto, sans-serif",
+      "scale": "Material3 Type Scale"
+    },
+    "shape": {
+      "small": "8dp rounded",
+      "medium": "12dp rounded",
+      "large": "16dp rounded"
+    },
+    "components": {
+      "top_app_bar": {
+        "style": "Large TopAppBar (6-button)",
+        "buttons": ["返回", "搜索", "导入", "进度", "设置", "更多(⋮)"],
+        "note": "新模块入口从现有主菜单进入，不在 TopAppBar 新增按钮"
+      },
+      "bottom_navigation": "不使用底部导航。页面间跳转通过顶部菜单 + 返回键 + 列表项点击"
+    },
+    "platform_note": "适配国产手机。无 Google Play Services 依赖。使用腾讯/华为/小米渠道的 WebView, SAF 文件选择器, Media3(ExoPlayer) 本地解码。"
+  },
+  "pages": [
+    {
+      "id": "shadowing_home",
+      "name": "ShadowingHomeScreen",
+      "title": "视频列表页",
+      "module": "M1 影子跟读",
+      "description": "展示已导入的所有影子跟读视频，支持空态引导和导入操作入口。",
+      "layout_structure": {
+        "type": "Column",
+        "children": [
+          { "id": "header", "type": "LargeTopAppBar", "title": "影子跟读", "actions": ["搜索(🔍)", "排序(⇅)"], "behavior": "滚动时折叠为 Medium TopAppBar" },
+          {
+            "id": "body", "type": "Box", "weight": "1f",
+            "content": {
+              "empty_state": {
+                "_when": "videoList.isEmpty()",
+                "type": "Column", "gravity": "center", "spacing": "16dp",
+                "children": [
+                  { "type": "Icon", "icon": "mic_outlined", "size": "80dp", "tint": "on_surface_variant_0.4" },
+                  { "type": "Text", "text": "导入你的第一个英语视频", "style": "titleMedium", "color": "on_surface_variant" },
+                  { "type": "Text", "text": "支持 B站链接 / 本地视频文件", "style": "bodySmall", "color": "on_surface_variant_0.6" }
+                ]
+              },
+              "video_list": {
+                "_when": "videoList.isNotEmpty()",
+                "type": "LazyColumn", "padding": "h:16dp t:8dp b:80dp",
+                "item": {
+                  "type": "Card", "shape": "medium", "elevation": "0dp", "fill": "surface_variant", "padding": "12dp",
+                  "onClick": "navigate('video_player', {videoId})",
+                  "children": [{ "type": "Row", "spacing": "12dp", "children": [
+                    { "type": "Box", "width": "120dp", "height": "72dp", "shape": "small", "clip": true,
+                      "content": { "type": "Image", "scale": "centerCrop", "placeholder": "渐变色占位" },
+                      "overlay": { "type": "Text", "text": "{duration}", "position": "bottomEnd", "padding": "4dp 6dp", "background": "scrim_0.6", "style": "labelSmall" } },
+                    { "type": "Column", "weight": "1f", "spacing": "4dp", "children": [
+                      { "type": "Text", "text": "{video.title}", "style": "titleSmall", "maxLines": 2, "ellipsis": "end" },
+                      { "type": "Text", "text": "{video.sentenceCount} 句 / {video.source}", "style": "bodySmall", "color": "on_surface_variant" },
+                      { "type": "LinearProgressIndicator", "progress": "{video.shadowingProgress}", "height": "4dp", "trackColor": "surface_0.8", "indicatorColor": "primary" }
+                    ] },
+                    { "type": "IconButton", "icon": "more_vert", "onClick": "showVideoMenu(videoId)",
+                      "menu": [{ "label": "重命名", "action": "renameVideo" }, { "label": "删除", "action": "deleteVideo", "destructive": true }] }
+                  ] }]
+                }
+              }
+            }
+          },
+          { "id": "fab", "type": "FloatingActionButton", "icon": "add", "containerColor": "primary", "contentColor": "on_primary",
+            "elevation": "6dp", "position": "bottomEnd (16dp edge, 16dp bottom)", "onClick": "showImportDialog()" }
+        ]
+      },
+      "state_mapping": { "source": "ShadowingUiState.videoList", "events": ["ShadowingEvent.LoadVideos", "ShadowingEvent.DeleteVideo"] }
+    },
+    {
+      "id": "import_dialog",
+      "name": "ImportMethodDialog",
+      "title": "导入方式弹窗",
+      "module": "M1 影子跟读",
+      "description": "底部弹出式对话框，提供 B站链接 和 本地文件 两种导入方式。",
+      "layout_structure": {
+        "type": "ModalBottomSheet", "shape": "top: large", "fill": "surface", "padding": "16dp 24dp 32dp",
+        "children": [
+          { "id": "handle", "type": "Spacer", "width": "32dp", "height": "4dp", "shape": "2dp rounded", "fill": "on_surface_variant_0.4", "margin": "0 auto 16dp" },
+          { "id": "title", "type": "Text", "text": "导入视频", "style": "titleLarge" },
+          {
+            "id": "options", "type": "Column", "spacing": "12dp",
+            "children": [
+              { "type": "Card", "shape": "medium", "fill": "surface_variant", "padding": "16dp", "onClick": "switchToBilibiliInput()",
+                "children": [{ "type": "Row", "spacing": "16dp", "alignment": "centerVertically", "children": [
+                  { "type": "Icon", "icon": "link", "size": "24dp", "tint": "primary" },
+                  { "type": "Column", "weight": "1f", "spacing": "2dp", "children": [
+                    { "type": "Text", "text": "B站链接", "style": "titleSmall" },
+                    { "type": "Text", "text": "粘贴B站视频链接自动下载", "style": "bodySmall", "color": "on_surface_variant" }
+                  ] },
+                  { "type": "Icon", "icon": "chevron_right", "size": "20dp", "tint": "on_surface_variant" }
+                ] }] },
+              { "type": "Card", "shape": "medium", "fill": "surface_variant", "padding": "16dp", "onClick": "pickLocalFile()",
+                "children": [{ "type": "Row", "spacing": "16dp", "alignment": "centerVertically", "children": [
+                  { "type": "Icon", "icon": "folder_open", "size": "24dp", "tint": "primary" },
+                  { "type": "Column", "weight": "1f", "spacing": "2dp", "children": [
+                    { "type": "Text", "text": "本地文件", "style": "titleSmall" },
+                    { "type": "Text", "text": "从手机存储选择视频文件", "style": "bodySmall", "color": "on_surface_variant" }
+                  ] },
+                  { "type": "Icon", "icon": "chevron_right", "size": "20dp", "tint": "on_surface_variant" }
+                ] }] }
+            ]
+          },
+          {
+            "id": "bilibili_input_panel", "_shown_when": "bilibiliMode == true", "type": "AnimatedVisibility", "animation": "slideInVertically + fadeIn",
+            "children": [
+              { "type": "Divider", "color": "outline_0.3", "margin": "8dp 0" },
+              { "type": "Row", "spacing": "12dp", "children": [
+                { "type": "OutlinedTextField", "weight": "1f", "placeholder": "粘贴B站视频链接...", "singleLine": true, "shape": "small",
+                  "onValueChange": "ShadowingEvent.ImportBilibili(url)", "trailingIcon": { "icon": "clear", "onClick": "clearUrl()" } },
+                { "type": "FilledButton", "text": "导入", "containerColor": "primary", "contentColor": "on_primary", "shape": "small",
+                  "onClick": "ShadowingEvent.ImportBilibili(url)", "enabled": "url.isNotEmpty()", "loading": "ShadowingUiState.downloadProgress != null" }
+              ] },
+              { "id": "download_progress", "_shown_when": "ShadowingUiState.downloadProgress != null",
+                "type": "Column", "spacing": "4dp", "margin": "8dp 0",
+                "children": [
+                  { "type": "LinearProgressIndicator", "progress": "{downloadProgress.percent / 100}", "height": "4dp" },
+                  { "type": "Row", "spacing": "8dp", "children": [
+                    { "type": "Text", "text": "{downloadProgress.percent}%", "style": "labelSmall" },
+                    { "type": "Text", "text": "{downloadProgress.speed}", "style": "labelSmall", "color": "on_surface_variant" }
+                  ] }
+                ] }
+            ]
+          }
+        ]
+      },
+      "interaction_notes": [
+        "点击FAB→ModalBottomSheet",
+        "选择本地文件→SAF文件选择器",
+        "选择B站链接→展开输入面板",
+        "输入URL→下载开始→显示进度条",
+        "下载中可取消",
+        "点击弹窗外区域关闭"
+      ]
+    },
+    {
+      "id": "video_player",
+      "name": "VideoPlayerScreen",
+      "title": "视频播放页",
+      "module": "M1 影子跟读",
+      "description": "全功能视频播放页，上半部分视频播放，下半部分字幕轨道 + 播放控制。",
+      "layout_structure": {
+        "type": "Column",
+        "children": [
+          { "id": "top_bar", "type": "TopAppBar", "style": "centerAligned", "navigation": { "icon": "arrow_back", "onClick": "navigateBack()" },
+            "title": "{video.title}", "maxLines": 1, "actions": [{ "icon": "more_vert", "menu": ["重命名", "删除视频"] }] },
+          { "id": "video_area", "type": "Box", "aspectRatio": "16:9", "fill": "black",
+            "content": {
+              "type": "AndroidView(ExoPlayer)",
+              "gestures": { "tap": "togglePlayPause()", "doubleTapLeft": "seekBackward(10s)", "doubleTapRight": "seekForward(10s)" },
+              "overlays": [
+                { "_shown_when": "isPlaying == false", "type": "Box", "gravity": "center", "content": { "type": "Icon", "icon": "play_circle", "size": "64dp", "tint": "white_0.8" } },
+                { "type": "Row", "position": "topEnd", "padding": "8dp", "children": [{ "type": "SuggestionChip", "text": "{playbackSpeed}x", "onClick": "showSpeedPickerDialog()" }] },
+                { "_shown_when": "hasSentences && currentSentenceIndex >= 0", "type": "Text", "text": "{sentences[currentSentenceIndex].text}", "style": "titleMedium", "color": "white", "position": "bottomCenter", "margin": "0 24dp 16dp", "textAlign": "center", "shadow": "0 2dp 8dp black_0.5" }
+              ]
+            } },
+          { "id": "seek_bar", "type": "Row", "padding": "0 16dp", "verticalAlignment": "centerVertically",
+            "children": [
+              { "type": "Text", "text": "{currentPosition}", "style": "labelSmall", "color": "on_surface_variant" },
+              { "type": "Slider", "weight": "1f", "value": "{currentPositionMs / durationMs}", "onValueChange": "seekTo(value * durationMs)" },
+              { "type": "Text", "text": "{duration}", "style": "labelSmall", "color": "on_surface_variant" }
+            ] },
+          { "id": "subtitle_list", "type": "Box", "weight": "1f",
+            "content": {
+              "type": "LazyColumn", "padding": "h:16dp",
+              "item": { "type": "Box", "padding": "12dp 16dp", "shape": "small", "onClick": "jumpToSentence(index)",
+                "states": [
+                  { "_when": "index == currentSentenceIndex", "fill": "primary_0.08", "borderStart": "primary 3dp" },
+                  { "_else": "fill: transparent" }
+                ],
+                "children": [{ "type": "Row", "spacing": "12dp", "children": [
+                  { "type": "Text", "text": "{timestamp}", "style": "labelSmall", "color": "on_surface_variant", "width": "48dp" },
+                  { "type": "Text", "text": "{sentence.text}", "style": "bodyMedium", "weight": "1f", "color": "on_surface" },
+                  { "_shown_when": "sentence.hasRecording", "type": "Icon", "icon": "check_circle", "size": "16dp", "tint": "primary" }
+                ] }]
+              }
+            } },
+          { "id": "control_bar", "type": "Row", "padding": "8dp 16dp 16dp", "spacing": "8dp", "verticalAlignment": "centerVertically", "fill": "surface", "elevation": "4dp",
+            "children": [
+              { "type": "IconButton", "icon": "replay_10", "size": "28dp", "onClick": "seekRelative(-10s)" },
+              { "type": "FilledIconButton", "icon": "play_arrow", "size": "40dp", "containerColor": "primary", "onClick": "togglePlayPause()" },
+              { "type": "IconButton", "icon": "forward_10", "size": "28dp", "onClick": "seekRelative(+10s)" },
+              { "type": "Spacer", "weight": "1f" },
+              { "type": "IconButton", "icon": "speed", "size": "24dp", "onClick": "showSpeedPickerDialog()", "tooltip": "播放速度" },
+              { "_when": "currentSentenceIndex >= 0", "type": "FilledTonalButton", "icon": "mic", "text": "跟读此句", "onClick": "navigate('shadowing_session', {videoId, sentenceId})" }
+            ] }
+        ]
+      },
+      "speed_picker_dialog": { "type": "AlertDialog", "shape": "large", "options": ["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"], "selected": "1.0x", "onSelect": "setPlaybackSpeed(speed)" },
+      "state_mapping": { "source": "ShadowingUiState (selectedVideo, sentences, currentSentenceIndex, isPlayingVideo)", "events": ["SelectVideo", "PlayVideo", "PauseVideo", "JumpToSentence", "LoadVideos"] }
+    },
+    {
+      "id": "shadowing_session",
+      "name": "ShadowingSessionScreen",
+      "title": "跟读模式页",
+      "module": "M1 影子跟读",
+      "description": "用户跟读录音的核心页面。显示当前句子，大录音按钮，波形可视化，回放对比，句子导航。",
+      "layout_structure": {
+        "type": "Column", "fill": "background",
+        "children": [
+          { "id": "top_bar", "type": "TopAppBar", "style": "centerAligned", "navigation": { "icon": "arrow_back", "onClick": "navigateBack()" }, "title": "跟读训练", "actions": [{ "icon": "settings", "onClick": "showSessionSettings()" }] },
+          { "id": "sentence_display", "type": "Box", "weight": "0.25f", "padding": "24dp 20dp",
+            "content": { "type": "Column", "gravity": "center", "spacing": "8dp",
+              "children": [
+                { "type": "Text", "text": "第 {currentSentenceIndex + 1} / {sentences.size} 句", "style": "labelMedium", "color": "on_surface_variant" },
+                { "type": "Text", "text": "{sentences[currentSentenceIndex].text}", "style": "headlineSmall", "textAlign": "center", "color": "on_surface" }
+              ] } },
+          { "id": "recording_area", "type": "Box", "weight": "0.40f",
+            "content": { "type": "Column", "gravity": "center", "spacing": "24dp",
+              "children": [
+                { "type": "Box", "width": "88dp", "height": "88dp", "shape": "circle",
+                  "pulseAnimationRecording": "scale 1.0->1.15, 1s infinite easeInOut",
+                  "content": {
+                    "type": "IconButton", "size": "40dp", "contentColor": "white", "elevation": "4dp",
+                    "iconMap": { "Idle": "mic", "Recording": "stop", "Playback": "play_arrow" },
+                    "containerColorMap": { "Idle": "primary", "Recording": "#FF5252", "Playback": "primary" },
+                    "onClickMap": { "Idle": "ShadowingEvent.StartRecording", "Recording": "ShadowingEvent.StopRecording", "Playback": "ShadowingEvent.PlayRecording" }
+                  } },
+                { "type": "Text", "textMap": { "Idle": "点击录音，朗读上方句子", "Recording": "录音中...", "Playback": "回放中" }, "style": "bodySmall", "color": "on_surface_variant" },
+                { "_shown_when": "recordingState == Recording", "type": "Box", "height": "48dp", "width": "fill", "padding": "0 32dp",
+                  "content": { "type": "CustomView(WaveformView)", "description": "实时音频波形可视化，32条竖线柱状图，从底向上填充，颜色 primary",
+                    "data_source": "AudioRecord.getMaxAmplitude() -> 映射至 0~1f" } }
+              ] } },
+          { "id": "playback_comparison", "_shown_when": "recordingState == Playback || (recordingState == Idle && hasRecording)",
+            "type": "Column", "padding": "0 20dp", "spacing": "12dp",
+            "children": [
+              { "type": "Row", "spacing": "12dp", "verticalAlignment": "centerVertically",
+                "children": [
+                  { "type": "Text", "text": "回放对比", "style": "titleSmall" },
+                  { "type": "Spacer", "weight": "1f" },
+                  { "type": "SegmentedButton", "options": [{ "label": "原文", "value": "original" }, { "label": "我的录音", "value": "recording" }],
+                    "selected": "activeAudioSource", "onSelect": "switchAudioSource(source)" }
+                ] },
+              { "type": "Row", "spacing": "16dp", "gravity": "center",
+                "children": [
+                  { "type": "IconButton", "icon": "volume_up", "onClick": "playOriginalSentence()", "tooltip": "播放原声" },
+                  { "type": "IconButton", "icon": "mic", "onClick": "playUserRecording()", "tooltip": "播放录音" },
+                  { "type": "FilledTonalButton", "icon": "fact_check", "text": "发音测评", "onClick": "navigate('assessment_home', {sentenceId, recordId})" }
+                ] },
+              { "_shown_when": "hasRecording", "type": "Row", "spacing": "8dp", "verticalAlignment": "centerVertically",
+                "children": [
+                  { "type": "Text", "text": "最近录音: {recordingDuration}", "style": "labelSmall", "color": "on_surface_variant" },
+                  { "type": "TextButton", "text": "删除", "color": "error", "onClick": "ShadowingEvent.DeleteRecording" }
+                ] }
+            ] },
+          { "id": "sentence_navigation", "type": "Row", "padding": "16dp 20dp 24dp", "spacing": "12dp", "verticalAlignment": "centerVertically",
+            "children": [
+              { "type": "OutlinedButton", "icon": "chevron_left", "text": "上一句", "enabled": "currentSentenceIndex > 0", "onClick": "ShadowingEvent.PreviousSentence" },
+              { "type": "Spacer", "weight": "1f" },
+              { "type": "IconButton", "icon": "list", "onClick": "showSentenceListSheet()", "tooltip": "句子列表" },
+              { "type": "Spacer", "weight": "1f" },
+              { "type": "OutlinedButton", "icon": "chevron_right", "text": "下一句", "enabled": "currentSentenceIndex < sentences.size - 1", "onClick": "ShadowingEvent.NextSentence" }
+            ] }
+        ]
+      },
+      "sentence_list_sheet": {
+        "type": "ModalBottomSheet",
+        "content": { "type": "LazyColumn", "item": { "type": "Row", "padding": "12dp 20dp", "onClick": "ShadowingEvent.JumpToSentence(index)",
+          "children": [
+            { "type": "Text", "text": "{sentence.timestamp}", "width": "56dp", "style": "labelSmall", "color": "on_surface_variant" },
+            { "type": "Text", "text": "{sentence.text}", "weight": "1f", "style": "bodyMedium", "color": "on_surface" },
+            { "_shown_when": "sentence.hasRecording", "type": "Icon", "icon": "check_circle", "size": "16dp", "tint": "primary" }
+          ] } }
+      },
+      "state_mapping": { "source": "ShadowingUiState (currentSentenceIndex, isRecording, recordingState, sentences)", "events": ["StartRecording", "StopRecording", "PlayRecording", "DeleteRecording", "NextSentence", "PreviousSentence", "JumpToSentence"] }
+    },
+    {
+      "id": "assessment_home",
+      "name": "AssessmentHomeScreen",
+      "title": "测评主页",
+      "module": "M2 发音测评",
+      "description": "基于影子跟读模块已录制的录音，选择要测评的条目。可从M1跳转过来自动预填，也可独立浏览。",
+      "layout_structure": {
+        "type": "Column",
+        "children": [
+          { "id": "top_bar", "type": "LargeTopAppBar", "title": "发音测评",
+            "actions": [{ "icon": "bar_chart", "onClick": "navigate('progress')" }, { "icon": "info", "onClick": "showGuideDialog()" }] },
+          { "id": "body", "type": "Box", "weight": "1f",
+            "content": {
+              "empty_state": {
+                "_when": "recordings.isEmpty() && historyRecords.isEmpty()",
+                "type": "Column", "gravity": "center", "spacing": "16dp",
+                "children": [
+                  { "type": "Icon", "icon": "record_voice_over", "size": "80dp", "tint": "on_surface_variant_0.4" },
+                  { "type": "Text", "text": "还没有录音记录", "style": "titleMedium", "color": "on_surface_variant" },
+                  { "type": "Text", "text": "先去影子跟读模块录音，再来测评发音", "style": "bodySmall", "color": "on_surface_variant_0.6" },
+                  { "type": "FilledTonalButton", "icon": "mic", "text": "去跟读", "onClick": "navigate('shadowing_home')" }
+                ]
+              },
+              "pending_section": {
+                "_shown_when": "recordings.isNotEmpty()",
+                "header": { "type": "Row", "padding": "16dp 20dp 8dp",
+                  "children": [
+                    { "type": "Text", "text": "待测评", "style": "titleSmall", "color": "primary" },
+                    { "type": "Spacer", "weight": "1f" },
+                    { "type": "Text", "text": "{recordings.size} 条", "style": "labelSmall", "color": "on_surface_variant" }
+                  ] },
+                "list": { "type": "LazyColumn",
+                  "item": { "type": "Card", "shape": "medium", "fill": "surface_variant", "padding": "12dp", "margin": "0 20dp 8dp", "onClick": "selectRecording(recording)",
+                    "children": [{ "type": "Row", "spacing": "12dp",
+                      "children": [
+                        { "type": "Column", "weight": "1f", "spacing": "4dp",
+                          "children": [
+                            { "type": "Text", "text": "{recording.videoTitle}", "style": "labelSmall", "color": "on_surface_variant", "maxLines": 1, "ellipsis": "end" },
+                            { "type": "Text", "text": "{recording.sentenceText}", "style": "bodyMedium", "maxLines": 2, "ellipsis": "end" },
+                            { "type": "Row", "spacing": "12dp",
+                              "children": [
+                                { "type": "Text", "text": "{recording.duration}", "style": "labelSmall", "color": "on_surface_variant" },
+                                { "type": "Text", "text": "{recording.createdAt}", "style": "labelSmall", "color": "on_surface_variant_0.6" }
+                              ] }
+                          ] },
+                        { "type": "Icon", "icon": "chevron_right", "size": "20dp", "tint": "on_surface_variant" }
+                      ] }] } }
+              },
+              "history_section": {
+                "_shown_when": "historyRecords.isNotEmpty()",
+                "header": { "type": "Row", "padding": "16dp 20dp 8dp",
+                  "children": [
+                    { "type": "Text", "text": "历史测评", "style": "titleSmall", "color": "on_surface_variant" },
+                    { "type": "Spacer", "weight": "1f" },
+                    { "type": "Text", "text": "{historyRecords.size} 条", "style": "labelSmall", "color": "on_surface_variant" }
+                  ] },
+                "list": { "type": "LazyColumn",
+                  "item": { "type": "Card", "shape": "medium", "fill": "surface_variant", "padding": "12dp", "margin": "0 20dp 8dp", "onClick": "navigate('assessment_result', {recordId})",
+                    "children": [{ "type": "Row", "spacing": "12dp", "verticalAlignment": "centerVertically",
+                      "children": [
+                        { "type": "Box", "width": "48dp", "height": "48dp", "shape": "circle", "border": "2dp solid {scoreColor}", "gravity": "center",
+                          "children": [{ "type": "Text", "text": "{record.overallScore}", "style": "titleMedium", "color": "on_surface_variant" }] },
+                        { "type": "Column", "weight": "1f", "spacing": "2dp",
+                          "children": [
+                            { "type": "Text", "text": "{record.sentenceText}", "style": "bodyMedium", "maxLines": 1, "ellipsis": "end" },
+                            { "type": "Text", "text": "{record.createdAt}", "style": "labelSmall", "color": "on_surface_variant_0.6" }
+                          ] },
+                        { "type": "Icon", "icon": "chevron_right", "size": "20dp", "tint": "on_surface_variant" }
+                      ] }] } }
+              }
+            } },
+          { "id": "bottom_action", "type": "Box", "padding": "16dp 20dp", "fill": "surface", "elevation": "8dp",
+            "content": { "type": "FilledButton", "width": "fill", "height": "48dp", "shape": "small",
+              "enabled": "selectedRecording != null || recordings.isNotEmpty()", "onClick": "startAssessment()",
+              "children": [
+                { "type": "Icon", "icon": "fact_check", "size": "20dp", "tint": "on_primary" },
+                { "type": "Spacer", "width": "8dp" },
+                { "type": "Text", "text": "开始测评", "style": "labelLarge" }
+              ] } }
+        ]
+      },
+      "state_mapping": { "source": "PronunciationUiState (targetSentence, recordedText, recordingState, historyRecords)", "events": ["SetTargetSentence", "SelectRecording", "LoadHistory", "AssessPronunciation"] }
+    },
+    {
+      "id": "assessment_result",
+      "name": "AssessmentResultScreen",
+      "title": "测评结果页",
+      "module": "M2 发音测评",
+      "description": "展示单次发音测评的详细结果，包含总体评分、音素着色分析、纠正建议。",
+      "layout_structure": {
+        "type": "Column",
+        "children": [
+          { "id": "top_bar", "type": "TopAppBar", "style": "centerAligned", "navigation": { "icon": "arrow_back", "onClick": "navigateBack()" }, "title": "测评结果" },
+          { "id": "scrollable_body", "type": "LazyColumn", "padding": "0 20dp 32dp",
+            "sections": [
+              { "id": "score_section", "type": "Card", "shape": "large", "fill": "surface_variant", "padding": "24dp", "margin": "0 0 16dp",
+                "children": [{ "type": "Column", "gravity": "center", "spacing": "12dp",
+                  "children": [
+                    { "type": "Box", "width": "120dp", "height": "120dp", "shape": "circle", "border": "4dp solid {scoreColor}", "gravity": "center",
+                      "children": [{ "type": "Column", "gravity": "center",
+                        "children": [
+                          { "type": "Text", "text": "{assessment.overallScore}", "style": "displaySmall", "color": "on_surface" },
+                          { "type": "Text", "text": "/ 100", "style": "labelSmall", "color": "on_surface_variant" }
+                        ] }] },
+                    { "type": "SuggestionChip", "text": "{assessment.grade}",
+                      "colorMap": { "excellent": "#4CAF50", "good": "#D0BCFF", "fair": "#FFB74D", "poor": "#EF5350" } }
+                  ] }] },
+              { "id": "dimension_scores", "type": "Row", "spacing": "12dp", "margin": "0 0 16dp",
+                "children": [
+                  { "type": "Card", "weight": "1f", "shape": "medium", "fill": "surface_variant", "padding": "16dp 12dp",
+                    "children": [{ "type": "Column", "gravity": "center", "spacing": "8dp",
+                      "children": [
+                        { "type": "Text", "text": "准确率", "style": "labelSmall", "color": "on_surface_variant" },
+                        { "type": "Text", "text": "{assessment.accuracy}", "style": "headlineSmall", "color": "{accuracyColor}" }
+                      ] }] },
+                  { "type": "Card", "weight": "1f", "shape": "medium", "fill": "surface_variant", "padding": "16dp 12dp",
+                    "children": [{ "type": "Column", "gravity": "center", "spacing": "8dp",
+                      "children": [
+                        { "type": "Text", "text": "流利度", "style": "labelSmall", "color": "on_surface_variant" },
+                        { "type": "Text", "text": "{assessment.fluency}", "style": "headlineSmall", "color": "{fluencyColor}" }
+                      ] }] },
+                  { "type": "Card", "weight": "1f", "shape": "medium", "fill": "surface_variant", "padding": "16dp 12dp",
+                    "children": [{ "type": "Column", "gravity": "center", "spacing": "8dp",
+                      "children": [
+                        { "type": "Text", "text": "完整度", "style": "labelSmall", "color": "on_surface_variant" },
+                        { "type": "Text", "text": "{assessment.completeness}", "style": "headlineSmall", "color": "{completenessColor}" }
+                      ] }] }
+                ] },
+              { "id": "phoneme_analysis", "type": "Card", "shape": "large", "fill": "surface_variant", "padding": "20dp", "margin": "0 0 16dp",
+                "children": [{ "type": "Column", "spacing": "12dp",
+                  "children": [
+                    { "type": "Text", "text": "音素分析", "style": "titleSmall" },
+                    { "type": "Text", "text": "{assessment.targetText}", "style": "titleMedium", "color": "on_surface" },
+                    { "type": "RichText", "description": "每个音素/单词按测评结果着色",
+                      "segments": [
+                        { "text": "The ", "color": "#EF5350", "tooltip": "发音不准确，th 发成了 d" },
+                        { "text": "quick ", "color": "#4CAF50", "tooltip": "正确" },
+                        { "text": "brown ", "color": "#FFB74D", "tooltip": "基本正确，元音略偏" },
+                        { "text": "fox", "color": "#EF5350", "tooltip": "发成了 foks" }
+                      ],
+                      "legend": [
+                        { "color": "#4CAF50", "label": "准确" },
+                        { "color": "#FFB74D", "label": "需改进" },
+                        { "color": "#EF5350", "label": "不准确" }
+                      ] }
+                  ] }] },
+              { "id": "suggestions", "type": "Card", "shape": "large", "fill": "surface_variant", "padding": "20dp", "margin": "0 0 16dp",
+                "children": [{ "type": "Column", "spacing": "12dp",
+                  "children": [
+                    { "type": "Row", "spacing": "8dp",
+                      "children": [
+                        { "type": "Icon", "icon": "tips_and_updates", "size": "20dp", "tint": "primary" },
+                        { "type": "Text", "text": "纠正建议", "style": "titleSmall" }
+                      ] },
+                    { "type": "Column", "spacing": "8dp",
+                      "children": [
+                        { "type": "Row", "spacing": "12dp", "padding": "12dp", "shape": "small", "fill": "surface_0.5",
+                          "children": [
+                            { "type": "Icon", "icon": "volume_up", "size": "20dp", "tint": "primary" },
+                            { "type": "Text", "text": "注意「the」中 /dh/ 的发音，舌尖应轻触上齿", "style": "bodySmall", "weight": "1f" }
+                          ], "onClick": "playOriginalAudio()" },
+                        { "type": "Row", "spacing": "12dp", "padding": "12dp", "shape": "small", "fill": "surface_0.5",
+                          "children": [
+                            { "type": "Icon", "icon": "spellcheck", "size": "20dp", "tint": "primary" },
+                            { "type": "Text", "text": "「fox」的元音开口不够大", "style": "bodySmall", "weight": "1f" }
+                          ], "onClick": "showPhonemeGuide(phoneme)" }
+                      ] }
+                  ] }] },
+              { "id": "actions", "type": "Column", "spacing": "12dp", "margin": "8dp 0 0",
+                "children": [
+                  { "type": "FilledTonalButton", "width": "fill", "height": "48dp", "icon": "refresh", "text": "重新测评（重录）", "onClick": "navigate('shadowing_session', {sentenceId, reRecord: true})" },
+                  { "type": "TextButton", "width": "fill", "text": "查看进步趋势", "onClick": "navigate('progress', {sentenceId})" }
+                ] }
+            ] }
+        ]
+      },
+      "score_color_mapping": { "90-100": "#4CAF50", "75-89": "#D0BCFF", "60-74": "#FFB74D", "0-59": "#EF5350" },
+      "state_mapping": { "source": "PronunciationUiState (assessment, targetSentence, recordedText)", "events": ["LoadHistory"] }
+    },
+    {
+      "id": "progress",
+      "name": "ProgressScreen",
+      "title": "进步追踪页",
+      "module": "M2 发音测评",
+      "description": "整体进步趋势可视化页面，包含评分折线图(历史趋势)和错误音素分布饼图。",
+      "layout_structure": {
+        "type": "Column",
+        "children": [
+          { "id": "top_bar", "type": "TopAppBar", "style": "centerAligned", "navigation": { "icon": "arrow_back", "onClick": "navigateBack()" }, "title": "进步追踪" },
+          { "id": "scrollable_body", "type": "LazyColumn", "padding": "0 20dp 32dp",
+            "sections": [
+              { "id": "summary_header", "type": "Row", "spacing": "16dp", "padding": "16dp 0",
+                "children": [
+                  { "type": "Card", "weight": "1f", "shape": "medium", "fill": "surface_variant", "padding": "16dp",
+                    "children": [{ "type": "Column", "gravity": "center", "spacing": "4dp",
+                      "children": [
+                        { "type": "Text", "text": "{totalAssessments}", "style": "headlineMedium", "color": "primary" },
+                        { "type": "Text", "text": "测评次数", "style": "labelSmall", "color": "on_surface_variant" }
+                      ] }] },
+                  { "type": "Card", "weight": "1f", "shape": "medium", "fill": "surface_variant", "padding": "16dp",
+                    "children": [{ "type": "Column", "gravity": "center", "spacing": "4dp",
+                      "children": [
+                        { "type": "Text", "text": "{averageScore}", "style": "headlineMedium", "color": "{avgScoreColor}" },
+                        { "type": "Text", "text": "平均分", "style": "labelSmall", "color": "on_surface_variant" }
+                      ] }] },
+                  { "type": "Card", "weight": "1f", "shape": "medium", "fill": "surface_variant", "padding": "16dp",
+                    "children": [{ "type": "Column", "gravity": "center", "spacing": "4dp",
+                      "children": [
+                        { "type": "Text", "text": "{bestScore}", "style": "headlineMedium", "color": "#4CAF50" },
+                        { "type": "Text", "text": "最高分", "style": "labelSmall", "color": "on_surface_variant" }
+                      ] }] }
+                ] },
+              { "id": "line_chart_card", "type": "Card", "shape": "large", "fill": "surface_variant", "padding": "20dp", "margin": "0 0 16dp",
+                "children": [{ "type": "Column", "spacing": "16dp",
+                  "children": [
+                    { "type": "Row",
+                      "children": [
+                        { "type": "Text", "text": "评分趋势", "style": "titleSmall" },
+                        { "type": "Spacer", "weight": "1f" },
+                        { "id": "chart_period_selector", "type": "SegmentedButton",
+                          "options": [{ "label": "7天", "value": 7 }, { "label": "30天", "value": 30 }, { "label": "全部", "value": -1 }],
+                          "selected": "selectedPeriod", "onSelect": "setChartPeriod(days)" }
+                      ] },
+                    { "type": "CustomView(LineChartView)", "height": "200dp",
+                      "description": "X轴: 日期(MM/dd), Y轴: 评分(0-100). 折线为总体评分, 可选显示各维度虚线.",
+                      "data_source": "historyRecords (按日期聚合取平均分)",
+                      "style": { "lineColor": "primary", "lineWidth": "2dp", "dotColor": "primary", "dotRadius": "3dp" } }
+                  ] }] },
+              { "id": "pie_chart_card", "type": "Card", "shape": "large", "fill": "surface_variant", "padding": "20dp", "margin": "0 0 16dp",
+                "children": [{ "type": "Column", "spacing": "16dp",
+                  "children": [
+                    { "type": "Text", "text": "错误音素分布", "style": "titleSmall" },
+                    { "type": "Row", "spacing": "24dp", "verticalAlignment": "centerVertically",
+                      "children": [
+                        { "type": "CustomView(PieChartView)", "width": "160dp", "height": "160dp",
+                          "description": "环形饼图(Doughnut). 圆环中心显示总错误数. 每个切片对应一个音素." },
+                        { "type": "Column", "weight": "1f", "spacing": "8dp",
+                          "children": [
+                            { "color": "#FF5252", "label": "th /dh/", "value": "32%" },
+                            { "color": "#FFB74D", "label": "r /r/", "value": "18%" },
+                            { "color": "#4CAF50", "label": "l /l/", "value": "15%" },
+                            { "color": "#64B5F6", "label": "其他", "value": "35%" }
+                          ] }
+                      ] }
+                  ] }] },
+              { "id": "recent_assessments", "type": "Column", "spacing": "8dp",
+                "children": [
+                  { "type": "Row", "padding": "8dp 0", "children": [{ "type": "Text", "text": "最近测评", "style": "titleSmall" }] },
+                  { "type": "LazyColumn",
+                    "item": { "type": "Card", "shape": "medium", "fill": "surface_variant", "padding": "12dp 16dp", "onClick": "navigate('assessment_result', {recordId})",
+                      "children": [{ "type": "Row", "spacing": "12dp", "verticalAlignment": "centerVertically",
+                        "children": [
+                          { "type": "Text", "text": "{record.score}", "style": "headlineSmall", "color": "{scoreColor}", "width": "48dp" },
+                          { "type": "Column", "weight": "1f", "spacing": "2dp",
+                            "children": [
+                              { "type": "Text", "text": "{record.sentenceText}", "style": "bodySmall", "maxLines": 1, "ellipsis": "end" },
+                              { "type": "Text", "text": "{record.date}", "style": "labelSmall", "color": "on_surface_variant_0.6" }
+                            ] },
+                          { "type": "Text", "text": "{record.trend}", "style": "labelSmall", "color": "{trendColor}" }
+                        ] }] } }
+                ] }
+            ] }
+        ]
+      },
+      "state_mapping": { "source": "PronunciationUiState (historyRecords, assessment)", "events": ["LoadHistory"] }
+    }
+  ],
+  "navigation_flow": {
+    "M1_flow": {
+      "start": "ShadowingHomeScreen",
+      "edges": [
+        { "from": "ShadowingHomeScreen", "action": "点击FAB", "to": "ImportMethodDialog" },
+        { "from": "ShadowingHomeScreen", "action": "点击视频卡片", "to": "VideoPlayerScreen" },
+        { "from": "ImportMethodDialog", "action": "选择B站链接+确认", "to": "ShadowingHomeScreen (刷新列表)" },
+        { "from": "ImportMethodDialog", "action": "选择本地文件", "to": "SAF文件选择器→ShadowingHomeScreen" },
+        { "from": "VideoPlayerScreen", "action": "点击跟读此句", "to": "ShadowingSessionScreen" },
+        { "from": "ShadowingSessionScreen", "action": "点击发音测评", "to": "AssessmentHomeScreen (预填)" },
+        { "from": "ShadowingSessionScreen", "action": "上下句导航", "to": "ShadowingSessionScreen (切换句子)" },
+        { "from": "任何页面", "action": "系统返回键/TopAppBar返回", "to": "上一页" }
+      ]
+    },
+    "M2_flow": {
+      "start": "AssessmentHomeScreen",
+      "edges": [
+        { "from": "AssessmentHomeScreen", "action": "点击开始测评", "to": "AssessmentResultScreen" },
+        { "from": "AssessmentHomeScreen", "action": "点击历史条目", "to": "AssessmentResultScreen" },
+        { "from": "AssessmentHomeScreen", "action": "点击进度按钮", "to": "ProgressScreen" },
+        { "from": "AssessmentResultScreen", "action": "点击重新测评", "to": "ShadowingSessionScreen" },
+        { "from": "AssessmentResultScreen", "action": "点击查看进步趋势", "to": "ProgressScreen" }
+      ]
+    }
+  },
+  "design_notes": [
+    "M1/M2 模块入口从现有TopAppBar 6按钮菜单进入，不新增Tab",
+    "每个列表页都有空态引导（图标+文字+操作按钮）",
+    "录音时圆形按钮呼吸脉冲动画(1.0→1.15)，录音中不可退出",
+    "波形可视化: AudioRecord.getMaxAmplitude()实时绘制，30fps",
+    "页面过渡使用Material3共享元素过渡，句切换fade+slide",
+    "适配国产手机: 系统手势/三键自适应，SAF文件选择器兼容国产定制ROM",
+    "视频列表LazyColumn+coil异步加载缩略图，字幕50句以上分页",
+    "所有IconButton配备contentDescription，音素着色支持TalkBack",
+    "从后台返回自动刷新(Lifecycle.repeatOnLifecycle)",
+    "Snackbar错误提示(3s自动消失)",
+    "评分颜色阈值未来可配置",
+    "M2与M1数据共享: 测评页面可从影子跟读直接跳转预选"
+  ],
+  "component_library": {
+    "custom_components": [
+      { "name": "WaveformView", "package": "com.wordmemo.app.ui.shadowing.view",
+        "description": "实时音频波形显示。32条竖线，每条高度映射当前振幅，颜色primary",
+        "used_in": ["ShadowingSessionScreen"] },
+      { "name": "LineChartView", "package": "com.wordmemo.app.ui.pronunciation.view",
+        "description": "评分趋势折线图。多维度叠加，X轴日期Y轴0-100",
+        "note": "v1使用MPAndroidChart或自定义Canvas", "used_in": ["ProgressScreen"] },
+      { "name": "PieChartView", "package": "com.wordmemo.app.ui.pronunciation.view",
+        "description": "环形饼图(Doughnut)，切片可点击下钻",
+        "note": "v1使用MPAndroidChart或自定义Canvas", "used_in": ["ProgressScreen"] },
+      { "name": "PhonemeColoredText", "package": "com.wordmemo.app.ui.pronunciation.view",
+        "description": "富文本组件，音素测评结果着色(绿/黄/红)，点击显示tooltip",
+        "used_in": ["AssessmentResultScreen"] }
+    ],
+    "reused_components": [
+      "wordmemo 已有的 TopAppBar 6按钮布局",
+      "wordmemo 已有的 Snackbar 错误提示",
+      "wordmemo 已有的 LoadingIndicator"
+    ]
+  }
+}

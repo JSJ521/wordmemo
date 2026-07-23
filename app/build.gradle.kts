@@ -25,8 +25,8 @@ android {
         applicationId = "com.wordmemo.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 76000
-        versionName = "6"
+        versionCode = 80000
+        versionName = "8"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -108,6 +108,14 @@ dependencies {
     // Encryption
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // Media3 - ExoPlayer (M1 影子跟读)
+    implementation("androidx.media3:media3-exoplayer:1.2.0")
+    implementation("androidx.media3:media3-ui:1.2.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.2.0")
+
+    // yt-dlp Android wrapper (M1 B站视频下载)
+    implementation("com.github.yausername:youtubedl-android:latest.release")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
@@ -119,4 +127,17 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
     testImplementation("io.mockk:mockk:1.13.9")
+    testImplementation("androidx.test:core:1.5.0")
+    testImplementation("androidx.room:room-testing:2.6.1")
+    testImplementation("org.robolectric:robolectric:4.11.1")
+}
+
+// 绕过 Windows 文件锁：每运行用唯一目录，不清理旧结果
+tasks.withType<Test> {
+    useJUnit()
+    reports.junitXml.required.set(true)
+    reports.html.required.set(true)
+    // UUID目录使每次运行都是新目录，无需删除旧output.bin
+    binaryResultsDirectory.set(file("${layout.buildDirectory.get()}/binary-results/${name}-${System.currentTimeMillis()}"))
+    outputs.doNotCacheIf("win-lock-workaround") { true }
 }

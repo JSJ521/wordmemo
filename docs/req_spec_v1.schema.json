@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://wordmemo.app/schemas/req_spec_v1.json",
+  "title": "词鼠书记需求规格说明书 Schema v1",
+  "description": "Validates req_spec_v1.json structure for WordMemo feature requirements",
+  "type": "object",
+  "required": ["meta", "project_context", "modules", "cross_module_dependencies", "architecture_impact", "non_functional_requirements", "release_plan", "appendix"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["version", "document_id", "purpose"],
+      "properties": {
+        "version": { "type": "string", "pattern": "^v\\d+$" },
+        "document_id": { "type": "string", "pattern": "^REQ_SPEC_v\\d+$" },
+        "purpose": { "type": "string", "minLength": 10 }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["module_id", "module_name", "risk_level", "capability_tags", "description", "function_points", "user_interaction_flow", "constraints"],
+        "properties": {
+          "module_id": { "type": "string", "pattern": "^M\\d+$" },
+          "risk_level": { "type": "string", "enum": ["高", "中", "低"] },
+          "capability_tags": { "type": "array", "minItems": 3, "items": { "type": "string" } },
+          "function_points": {
+            "type": "array",
+            "minItems": 3,
+            "items": {
+              "type": "object",
+              "required": ["fp_id", "name", "priority", "description", "acceptance_criteria"],
+              "properties": {
+                "fp_id": { "type": "string" },
+                "priority": { "type": "string", "enum": ["P0", "P1", "P2"] },
+                "acceptance_criteria": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+              }
+            }
+          },
+          "user_interaction_flow": {
+            "type": "array",
+            "minItems": 3,
+            "items": {
+              "type": "object",
+              "required": ["step", "action", "screen", "expected_result"]
+            }
+          },
+          "constraints": {
+            "type": "object",
+            "required": ["offline_priority", "permission_minimization", "data_localization"]
+          }
+        }
+      }
+    },
+    "cross_module_dependencies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "dependency", "type"]
+      }
+    },
+    "architecture_impact": {
+      "type": "object",
+      "required": ["new_packages", "modified_files", "version_migration"],
+      "properties": {
+        "new_packages": { "type": "array", "minItems": 1 },
+        "modified_files": { "type": "array", "minItems": 1 },
+        "version_migration": {
+          "type": "object",
+          "required": ["next_version", "db_migration_version"]
+        }
+      }
+    },
+    "non_functional_requirements": {
+      "type": "object",
+      "required": ["performance", "security", "compatibility"]
+    },
+    "release_plan": {
+      "type": "object",
+      "required": ["phase", "milestones"],
+      "properties": {
+        "milestones": { "type": "array", "minItems": 1 }
+      }
+    },
+    "appendix": {
+      "type": "object",
+      "required": ["glossary"],
+      "properties": {
+        "glossary": { "type": "object", "minProperties": 3 }
+      }
+    }
+  }
+}

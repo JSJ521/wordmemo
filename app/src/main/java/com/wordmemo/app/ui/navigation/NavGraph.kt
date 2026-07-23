@@ -18,6 +18,11 @@ import com.wordmemo.app.ui.screen.stats.StatsScreen
 import com.wordmemo.app.ui.screen.worddetail.WordDetailScreen
 import com.wordmemo.app.ui.screen.wordgraph.WordGraphScreen
 import com.wordmemo.app.ui.screen.wordlist.WordListScreen
+import com.wordmemo.app.ui.screen.shadowing.ShadowingHomeScreen
+import com.wordmemo.app.ui.screen.shadowing.ShadowingSessionScreen
+import com.wordmemo.app.ui.screen.pronunciation.AssessmentHomeScreen
+import com.wordmemo.app.ui.screen.pronunciation.AssessmentResultScreen
+import com.wordmemo.app.ui.screen.pronunciation.ProgressScreen
 
 private val fadeSlideIn = slideInHorizontally(
     animationSpec = tween(280),
@@ -153,6 +158,73 @@ fun NavGraph(navController: NavHostController) {
             enterTransition = { fadeSlideIn },
             exitTransition = { fadeSlideOut }
         ) { OcrScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // S2 影子跟读
+        composable(Screen.ShadowingHome.route,
+            enterTransition = { fadeSlideIn },
+            exitTransition = { fadeSlideOut }
+        ) { ShadowingHomeScreen(
+                onNavigateToSession = { videoId ->
+                    navController.navigate(Screen.ShadowingSession.createRoute(videoId))
+                },
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.ShadowingSession.ROUTE,
+            arguments = listOf(navArgument("videoId") { type = NavType.LongType }),
+            enterTransition = { fadeSlideIn },
+            exitTransition = { fadeSlideOut }
+        ) { backStackEntry ->
+            val videoId = backStackEntry.arguments?.getLong("videoId") ?: return@composable
+            ShadowingSessionScreen(
+                videoId = videoId,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // S2 发音测评
+        composable(Screen.AssessmentHome.route,
+            enterTransition = { fadeSlideIn },
+            exitTransition = { fadeSlideOut }
+        ) { AssessmentHomeScreen(
+                onNavigateToResult = { assessmentId ->
+                    navController.navigate(Screen.AssessmentResult.createRoute(assessmentId))
+                },
+                onNavigateToProgress = {
+                    navController.navigate(Screen.Progress.route)
+                },
+                onNavigateToShadowing = {
+                    navController.navigate(Screen.ShadowingHome.route)
+                },
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.AssessmentResult.ROUTE,
+            arguments = listOf(navArgument("assessmentId") { type = NavType.LongType }),
+            enterTransition = { fadeSlideIn },
+            exitTransition = { fadeSlideOut }
+        ) { backStackEntry ->
+            val assessmentId = backStackEntry.arguments?.getLong("assessmentId") ?: return@composable
+            AssessmentResultScreen(
+                assessmentId = assessmentId,
+                onNavigateToProgress = {
+                    navController.navigate(Screen.Progress.route)
+                },
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.Progress.route,
+            enterTransition = { fadeSlideIn },
+            exitTransition = { fadeSlideOut }
+        ) { ProgressScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

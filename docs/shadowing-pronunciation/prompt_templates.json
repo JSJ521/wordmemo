@@ -1,0 +1,381 @@
+{
+  "meta": {
+    "document_name": "词鼠书记 AI提示词模板集",
+    "document_id": "PROMPT_TEMPLATES_v1",
+    "version": "v1",
+    "app_name": "词鼠书记 (WordMemo)",
+    "target_modules": ["M1 影子跟读", "M2 发音测评"],
+    "bound_req_spec_version": "v1",
+    "api_config": {
+      "provider": "DeepSeek API",
+      "api_base_url": "https://api.deepseek.com",
+      "model": "deepseek-chat",
+      "default_params": {
+        "temperature": 0.3,
+        "max_tokens": 2048,
+        "response_format": { "type": "json_object" }
+      }
+    },
+    "design_principles": [
+      "所有 user_prompt 中 {{placeholder}} 为运行时变量，调用方在发送前替换",
+      "所有 prompt 输出均为严格 JSON，无额外markdown包裹",
+      "temperature=0.3 保证结构化输出稳定性",
+      "简洁指令、结构化输出，避免冗长示例",
+      "system_prompt 含固定规则，user_prompt 变量占位符由客户端填充"
+    ],
+    "date": "2026-07-22",
+    "author": "Hermes Agent / subagent",
+    "status": "final"
+  },
+
+  "templates": [
+
+    {
+      "template_id": "T1_SENTENCE_SPLIT",
+      "module": "M1 影子跟读",
+      "name": "句子分割模板",
+      "description": "将ASR转录的原始英文文本按语义拆分为完整句子，按出现顺序排序",
+      "scenario": "视频导入后，Whisper ASR返回的原始转录文本（可能不含标点、分段混乱），需要拆分为句子级单元供逐句跟读使用",
+      "input_variables": [
+        { "name": "raw_transcript", "type": "string", "description": "Whisper ASR 返回的原始英文转录文本" }
+      ],
+
+      "system_prompt": "You are a sentence segmentation assistant for an English shadowing app called WordMemo. Your task is to split raw ASR (Automatic Speech Recognition) transcript text into complete, grammatically correct English sentences. Rules:\n\n1. Split ONLY when a complete thought/grammatical sentence has ended.\n2. DO NOT split mid-clause — if a clause continues, keep it joined.\n3. If the raw text lacks punctuation, infer sentence boundaries from structure (capitalization, clause markers, conjunctions).\n4. Preserve exact word order — do not reorder, add, or remove words.\n5. If a sentence is fragmented/incomplete, flag it with \"is_complete\": false.\n6. Output must be valid JSON only, no markdown, no commentary.",
+
+      "user_prompt_template": "Raw ASR transcript:\n```\n{{raw_transcript}}\n```\n\nSplit into sentences and return JSON array. Each sentence must keep the exact original words in order.",
+
+      "expected_output_format": {
+        "description": "JSON object containing an ordered list of sentences",
+        "json_schema": {
+          "type": "object",
+          "properties": {
+            "sentences": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "index": { "type": "integer", "description": "Sentence order (1-based)" },
+                  "text": { "type": "string", "description": "Sentence text with original words preserved" },
+                  "is_complete": { "type": "boolean", "description": "Whether the sentence is grammatically complete" }
+                },
+                "required": ["index", "text", "is_complete"]
+              }
+            },
+            "total_sentences": { "type": "integer" },
+            "original_word_count": { "type": "integer" }
+          },
+          "required": ["sentences", "total_sentences", "original_word_count"]
+        },
+        "example_output": {
+          "sentences": [
+            { "index": 1, "text": "The quick brown fox jumps over the lazy dog.", "is_complete": true },
+            { "index": 2, "text": "This is the second sentence in the transcript.", "is_complete": true },
+            { "index": 3, "text": "However the third one", "is_complete": false }
+          ],
+          "total_sentences": 3,
+          "original_word_count": 21
+        }
+      },
+
+      "error_handling": {
+        "empty_input": "Return {\"sentences\": [], \"total_sentences\": 0, \"original_word_count\": 0}",
+        "single_sentence": "Return array with one item — do not attempt to split what cannot be split",
+        "non_english_input": "Treat text as-is; do not attempt language detection or translation"
+      }
+    },
+
+    {
+      "template_id": "T2_DIFF_ANALYSIS",
+      "module": "M2 发音测评",
+      "name": "发音差异分析模板",
+      "description": "比较发音测评场景中参考文本（reference）与用户实际朗读文本（actual），输出逐词对照的差异分析",
+      "scenario": "场景A — 用户朗读完英文句子后，ASR转录出用户实际说的文本，需要与标准文本进行逐词对比，定位发音差异",
+      "input_variables": [
+        { "name": "reference_text", "type": "string", "description": "标准参考文本（用户应该读的句子）" },
+        { "name": "actual_text", "type": "string", "description": "ASR转录的用户实际朗读文本" }
+      ],
+
+      "system_prompt": "You are a pronunciation comparison analyst for WordMemo, an English learning app. Compare the reference sentence against the user's actual spoken transcription and identify pronunciation differences.\n\nRules:\n1. Align words between reference_text and actual_text — identify insertions, deletions, substitutions, and correct words.\n2. For each mismatched word, analyze the likely phonetic cause (e.g., vowel substitution, consonant drop, syllable addition/omission, stress shift).\n3. Be specific about which phoneme(s) likely caused the error.\n4. If actual_text is empty or too short (< 50% of reference word count), flag it as \"likely_incomplete_recording\".\n5. Output must be valid JSON only, no markdown, no commentary.",
+
+      "user_prompt_template": "Reference sentence: {{reference_text}}\nUser's actual speech (ASR result): {{actual_text}}\n\nAnalyze word-by-word differences and return structured JSON.",
+
+      "expected_output_format": {
+        "description": "JSON object containing per-word comparison and overall analysis",
+        "json_schema": {
+          "type": "object",
+          "properties": {
+            "overall": {
+              "type": "object",
+              "properties": {
+                "reference_word_count": { "type": "integer" },
+                "actual_word_count": { "type": "integer" },
+                "correct_word_count": { "type": "integer" },
+                "error_word_count": { "type": "integer" },
+                "accuracy_rate": { "type": "number", "description": "0.0 ~ 1.0" },
+                "likely_incomplete": { "type": "boolean", "description": "Actual text is too short relative to reference" }
+              },
+              "required": ["reference_word_count", "actual_word_count", "correct_word_count", "error_word_count", "accuracy_rate", "likely_incomplete"]
+            },
+            "word_comparisons": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "reference_word": { "type": "string" },
+                  "actual_word": { "type": ["string", "null"], "description": "null if word was omitted" },
+                  "status": { "type": "string", "enum": ["correct", "substitution", "deletion", "insertion"] },
+                  "phonetic_notes": { "type": "string", "description": "Brief analysis in Chinese, e.g. '参考单词中的 /θ/ 被发成 /s/'" }
+                },
+                "required": ["reference_word", "actual_word", "status", "phonetic_notes"]
+              }
+            },
+            "common_error_patterns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pattern": { "type": "string", "description": "Pattern description in Chinese, e.g. '词尾辅音 /d/ 被省略'" },
+                  "frequency": { "type": "integer", "description": "How many times this pattern appeared" }
+                },
+                "required": ["pattern", "frequency"]
+              }
+            }
+          },
+          "required": ["overall", "word_comparisons", "common_error_patterns"]
+        },
+        "example_output": {
+          "overall": {
+            "reference_word_count": 8,
+            "actual_word_count": 7,
+            "correct_word_count": 5,
+            "error_word_count": 3,
+            "accuracy_rate": 0.625,
+            "likely_incomplete": false
+          },
+          "word_comparisons": [
+            { "reference_word": "the", "actual_word": "the", "status": "correct", "phonetic_notes": "发音正确" },
+            { "reference_word": "quick", "actual_word": "quik", "status": "substitution", "phonetic_notes": "词尾 /k/ 被省略，/kwɪk/ 读成 /kwɪ/" },
+            { "reference_word": "brown", "actual_word": null, "status": "deletion", "phonetic_notes": "brown 被跳读未读出" },
+            { "reference_word": "fox", "actual_word": "fox", "status": "correct", "phonetic_notes": "发音正确" },
+            { "reference_word": null, "actual_word": "very", "status": "insertion", "phonetic_notes": "额外插入了 very" },
+            { "reference_word": "jumps", "actual_word": "jump", "status": "substitution", "phonetic_notes": "第三人称词尾 /s/ 被省略" },
+            { "reference_word": "over", "actual_word": "over", "status": "correct", "phonetic_notes": "发音正确" },
+            { "reference_word": "the", "actual_word": "the", "status": "correct", "phonetic_notes": "发音正确" },
+            { "reference_word": "dog", "actual_word": "dok", "status": "substitution", "phonetic_notes": "词尾 /ɡ/ 被发成 /k/，清辅音化" }
+          ],
+          "common_error_patterns": [
+            { "pattern": "词尾辅音被省略（/k/, /s/）", "frequency": 2 },
+            { "pattern": "词尾浊辅音清辅音化（/ɡ/→/k/）", "frequency": 1 },
+            { "pattern": "单词跳过未读", "frequency": 1 }
+          ]
+        }
+      },
+
+      "error_handling": {
+        "empty_actual": "Return accuracy_rate=0, likely_incomplete=true, word_comparisons all marked as 'deletion'",
+        "identical_texts": "Return all words as 'correct', accuracy_rate=1.0",
+        "mismatch_length": "Use best-effort alignment; mark extra words as 'insertion' and missing words as 'deletion'"
+      }
+    },
+
+    {
+      "template_id": "T3_CORRECTION_ADVICE",
+      "module": "M2 发音测评",
+      "name": "纠正建议生成模板",
+      "description": "针对识别出的发音错误，生成具体的舌位/口型/发音技巧纠正建议",
+      "scenario": "场景B — 已识别出用户发音错误（替换/省略/插入），需要给出针对每个错误模式的可执行纠正建议",
+      "input_variables": [
+        { "name": "error_word", "type": "string", "description": "用户读错的英文单词" },
+        { "name": "target_word", "type": "string", "description": "正确的参考单词" },
+        { "name": "error_description", "type": "string", "description": "差异分析的简要描述，如 '词尾 /d/ 被省略'" },
+        { "name": "phoneme_ipa", "type": "string", "description": "涉及音素的IPA音标，如 '/d/'" },
+        { "name": "sentence_context", "type": "string", "description": "包含该单词的完整句子上下文" }
+      ],
+
+      "system_prompt": "You are a pronunciation coach for WordMemo, an English learning app for Chinese speakers. Generate actionable, precise correction advice for mispronounced English words.\n\nCRITICAL RULES:\n1. Focus on articulatory phonetics — tongue position, lip shape, jaw opening, airflow.\n2. Write explanation in Chinese (the user's native language), with English phonemes and IPA references.\n3. Compare the target phoneme with the closest Mandarin Chinese phoneme the user might be substituting.\n4. Be encouraging but precise — use phrases like '试试这样' instead of '你错了'.\n5. For each piece of advice, include a simple practice technique (e.g., '先发中文X音，然后移动舌头到Y位置').\n6. If the error is a word boundary issue (linking, elision), explain the connected speech rule.\n7. Output must be valid JSON only, no markdown, no commentary.",
+
+      "user_prompt_template": "Error word pronounced by user: {{error_word}}\nTarget (correct) word: {{target_word}}\nError description: {{error_description}}\nPhoneme involved (IPA): {{phoneme_ipa}}\nSentence context: \"{{sentence_context}}\"\n\nGenerate specific correction advice in Chinese.",
+
+      "expected_output_format": {
+        "description": "JSON object with structured correction guidance",
+        "json_schema": {
+          "type": "object",
+          "properties": {
+            "target_word": { "type": "string" },
+            "target_pronunciation": { "type": "string", "description": "Correct pronunciation in IPA, e.g. '/ðə/'" },
+            "error_summary": { "type": "string", "description": "One-line Chinese summary of the error" },
+            "articulation_advice": {
+              "type": "object",
+              "properties": {
+                "tongue_position": { "type": "string", "description": "舌位描述，如'舌尖抵住上齿龈后缘'" },
+                "lip_shape": { "type": "string", "description": "唇形描述，如'双唇微微收圆'" },
+                "airflow": { "type": "string", "description": "气流路径描述，如'气流从舌侧流出'" },
+                "voicing": { "type": "string", "description": "声带振动说明，如'声带振动（浊辅音）'" }
+              },
+              "required": ["tongue_position", "lip_shape", "airflow", "voicing"]
+            },
+            "chinese_transfer_note": { "type": "string", "description": "中文母语迁移说明，指出用户为何容易发错这个音" },
+            "practice_tip": { "type": "string", "description": "一个可立即练习的技巧，如'先发中文「日」，舌尖后移'"},
+            "minimal_pair_examples": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pair": { "type": "string", "description": "最小对立对，如'ship / sheep'" },
+                  "phoneme_contrast": { "type": "string", "description": "音素对比说明" }
+                },
+                "required": ["pair", "phoneme_contrast"]
+              }
+            }
+          },
+          "required": ["target_word", "target_pronunciation", "error_summary", "articulation_advice", "practice_tip"]
+        },
+        "example_output": {
+          "target_word": "think",
+          "target_pronunciation": "/θɪŋk/",
+          "error_summary": "将 /θ/（齿间清擦音）发成了 /s/（齿龈清擦音）",
+          "articulation_advice": {
+            "tongue_position": "舌尖轻轻伸出上下齿之间，不要抵住上齿龈",
+            "lip_shape": "上下唇自然微张，不要收圆",
+            "airflow": "气流从舌尖与上齿之间的缝隙持续流出",
+            "voicing": "声带不振动（清辅音）"
+          },
+          "chinese_transfer_note": "中文普通话中没有 /θ/ 音，中国学习者习惯用最接近的 /s/ 替代。发 /s/ 时舌尖在口腔内抵住上齿龈，而 /θ/ 需要舌尖伸出齿间。",
+          "practice_tip": "试试这样：先伸出舌尖用牙齿轻咬住，然后吹气发出「丝」的声音但不让舌尖缩回去。练习单词：think → sink, thank → sank, three → free",
+          "minimal_pair_examples": [
+            { "pair": "think / sink", "phoneme_contrast": "/θ/ 齿间擦音 vs /s/ 齿龈擦音" },
+            { "pair": "thank / sank", "phoneme_contrast": "/θ/ 齿间擦音 vs /s/ 齿龈擦音" },
+            { "pair": "mouth / mouse", "phoneme_contrast": "词尾 /θ/ 齿间擦音 vs /s/ 齿龈擦音" }
+          ]
+        }
+      },
+
+      "error_handling": {
+        "unknown_phoneme": "If the phoneme doesn't exist in standard English IPA, describe acoustically what the user should aim for",
+        "no_mandarin_equivalent": "If no Chinese reference point exists, provide purely articulatory description with a focus on tongue/teeth/lip positions"
+      }
+    },
+
+    {
+      "template_id": "T4_PRONUNCIATION_SCORING",
+      "module": "M2 发音测评",
+      "name": "发音评分模板",
+      "description": "根据用户朗读文本与标准文本的匹配度，给出多维发音评分",
+      "scenario": "场景C — 用户完成录音后，ASR转录文本与参考文本进行对比，从准确性、流利度、完整度三个维度评分",
+      "input_variables": [
+        { "name": "reference_text", "type": "string", "description": "标准参考文本" },
+        { "name": "actual_text", "type": "string", "description": "ASR转录的用户实际文本" },
+        { "name": "diff_analysis_json", "type": "string", "description": "T2输出的差异分析JSON（可选），如未提供则模型自行分析" }
+      ],
+
+      "system_prompt": "You are a pronunciation scoring system for WordMemo, an English learning app. Score the user's pronunciation based on comparing their spoken transcription against the reference text.\n\nScoring dimensions (each 0-100):\n1. ACCURACY (准确度): How many words/phonemes were pronounced correctly. Penalize substitutions and deletions heavily, insertions moderately.\n   - 90-100: Near-native, all words match\n   - 75-89: Minor deviations, mostly intelligible\n   - 60-74: Noticeable errors affecting intelligibility\n   - <60: Significant errors, hard to understand\n\n2. FLUENCY (流利度): How smoothly the user spoke. Infer from word count ratio and how closely actual_text matches reference_text length.\n   - 90-100: Natural pace, close to reference length\n   - 75-89: Slightly hesitant, minor extra/fewer words\n   - 60-74: Noticeable pauses or rushed delivery\n   - <60: Very choppy or incomplete\n\n3. COMPLETENESS (完整度): What fraction of the reference was actually attempted.\n   - 90-100: All words attempted\n   - 75-89: >75% of words attempted\n   - 60-74: 50-75% attempted\n   - <60: Less than half attempted\n\nRULES:\n- If actual_text is empty: accuracy=0, fluency=0, completeness=0, overall=0\n- If identical: accuracy=100, fluency=100, completeness=100, overall=100\n- Overall score = weighted average: accuracy*0.5 + fluency*0.25 + completeness*0.25\n- Output must be valid JSON only, no markdown, no commentary.",
+
+      "user_prompt_template": "Reference text: {{reference_text}}\nUser's spoken text (ASR): {{actual_text}}\n\n{{#diff_analysis_json}}Diff analysis (optional): {{diff_analysis_json}}{{/diff_analysis_json}}\n\nScore the pronunciation across accuracy, fluency, and completeness dimensions. Return structured JSON.",
+
+      "expected_output_format": {
+        "description": "JSON object with multi-dimensional scores and textual feedback",
+        "json_schema": {
+          "type": "object",
+          "properties": {
+            "scores": {
+              "type": "object",
+              "properties": {
+                "accuracy": {
+                  "type": "object",
+                  "properties": {
+                    "value": { "type": "integer", "minimum": 0, "maximum": 100 },
+                    "level": { "type": "string", "enum": ["excellent", "good", "fair", "needs_improvement"] },
+                    "detail": { "type": "string", "description": "One-sentence Chinese explanation of accuracy score" }
+                  },
+                  "required": ["value", "level", "detail"]
+                },
+                "fluency": {
+                  "type": "object",
+                  "properties": {
+                    "value": { "type": "integer", "minimum": 0, "maximum": 100 },
+                    "level": { "type": "string", "enum": ["excellent", "good", "fair", "needs_improvement"] },
+                    "detail": { "type": "string", "description": "One-sentence Chinese explanation of fluency score" }
+                  },
+                  "required": ["value", "level", "detail"]
+                },
+                "completeness": {
+                  "type": "object",
+                  "properties": {
+                    "value": { "type": "integer", "minimum": 0, "maximum": 100 },
+                    "level": { "type": "string", "enum": ["excellent", "good", "fair", "needs_improvement"] },
+                    "detail": { "type": "string", "description": "One-sentence Chinese explanation of completeness score" }
+                  },
+                  "required": ["value", "level", "detail"]
+                },
+                "overall": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Weighted: accuracy*0.5 + fluency*0.25 + completeness*0.25"
+                }
+              },
+              "required": ["accuracy", "fluency", "completeness", "overall"]
+            },
+            "feedback": {
+              "type": "string",
+              "description": "One encouraging sentence in Chinese summarizing the user's performance, e.g. '整体不错！注意词尾辅音不要省略。'"
+            },
+            "score_level": {
+              "type": "string",
+              "enum": ["excellent", "good", "fair", "needs_improvement"],
+              "description": "Overall score level: >=90 excellent, >=75 good, >=60 fair, <60 needs_improvement"
+            }
+          },
+          "required": ["scores", "feedback", "score_level"]
+        },
+        "example_output": {
+          "scores": {
+            "accuracy": {
+              "value": 72,
+              "level": "fair",
+              "detail": "8个词中有3个发音偏差（替换2个 + 省略1个），准确度一般"
+            },
+            "fluency": {
+              "value": 85,
+              "level": "good",
+              "detail": "朗读节奏基本顺畅，但实际读出了与标准词数接近，无明显停顿"
+            },
+            "completeness": {
+              "value": 88,
+              "level": "good",
+              "detail": "大部分内容已读出，仅有1个词（brown）被跳读"
+            },
+            "overall": 79
+          },
+          "feedback": "整体发音良好！重点练习词尾辅音的完整发音，尤其是 /k/ 和 /d/ 不要省略。",
+          "score_level": "good"
+        }
+      },
+
+      "error_handling": {
+        "empty_actual": "Return all scores=0, score_level='needs_improvement', feedback='未检测到录音内容，请重新录音'",
+        "identical_texts": "Return all scores=100, score_level='excellent', feedback='发音完美！继续保持'",
+        "score_rounding": "Round all scores to nearest integer. Overall = round(accuracy*0.5 + fluency*0.25 + completeness*0.25)"
+      }
+    }
+
+  ],
+
+  "usage_guide": {
+    "general": [
+      "所有模板使用 DeepSeek API，model=deepseek-chat，temperature=0.3，response_format={type: 'json_object'}",
+      "调用前将 user_prompt_template 中的 {{variable}} 替换为实际值",
+      "如果调用返回非JSON或解析失败，重试最多1次，若仍失败则返回错误给用户",
+      "所有prompt中的变量均需做HTML转义（如 & → &amp;），防止注入",
+      "ApiClient 层通过 AiApiClient 统一调用（复用现有架构）"
+    ],
+    "template_dependencies": [
+      { "from": "T4 评分", "depends_on": "T2 差异分析", "note": "T4可接收T2的diff_analysis_json作为可选输入，提高评分准确性" },
+      { "from": "T3 纠正建议", "depends_on": "T2 差异分析", "note": "T2分析出的每个错误词可逐一调用T3生成详细纠正建议" }
+    ],
+    "pipeline_flow": {
+      "m1_sentence_split": "ASR原始转录 → T1 → 句子列表 → 写入Room shadowing_sentences 表",
+      "m2_assessment": "用户录音 → ASR转录 → T2差异分析 → (可选T4评分 + 可选T3逐错误纠正建议) → 写入Room assessment_records 表"
+    }
+  }
+}

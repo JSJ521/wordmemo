@@ -1,0 +1,629 @@
+{
+  "meta": {
+    "document_name": "词鼠书记 美学基调研究报告",
+    "document_id": "AESTHETIC_FOUNDATION_v1",
+    "version": "v1",
+    "app_name": "词鼠书记 (WordMemo)",
+    "target_modules": ["M1 影子跟读", "M2 发音测评"],
+    "bound_req_spec_version": "v1",
+    "date": "2026-07-22",
+    "author": "Hermes Agent / subagent",
+    "status": "final",
+    "purpose": "为影子跟读模块(M1)与发音测评模块(M2)定义完整的美学基调体系 — 涵盖色彩系统、排版规范、组件视觉状态、视频字幕可读性方案 — 确保新模块与现有暗色Material3主题无缝融合",
+    "design_philosophy": "极简克制 · 功能优先 · 暗色沉浸 · 纯暗延续（不新增亮色模式）"
+  },
+
+  "theme_inheritance": {
+    "base_theme": "暗色 Material3 (Dark)",
+    "light_mode": "不提供 — 纯暗色主题延续",
+    "inheritance_rule": "新模块全量继承现有主题的 Material3 darkColorScheme 基底色，仅扩展新增语义色和组件色。不修改现有主题色值。",
+    "theme_switching": "无亮暗切换开关，统一深色背景"
+  },
+
+  "color_system": {
+    "strategy": "在现有Material3暗色主题上扩展模块专属语义色，确保60:30:10比例（基底60% / 表面30% / 强调10%）",
+    "inherited_colors": {
+      "background": "#1A1A1A",
+      "surface": "#2A2A2A",
+      "surface_variant": "#333333",
+      "on_background": "#E8E8E8",
+      "on_surface": "#E0E0E0",
+      "on_surface_variant": "#A0A0A0",
+      "outline": "#555555",
+      "outline_variant": "#444444",
+      "primary": "#6C9FFF",
+      "on_primary": "#0A0A0A",
+      "secondary": "#8AB4F8",
+      "tertiary": "#A8C7FA"
+    },
+
+    "new_semantic_colors": {
+      "description": "新增模块专用语义色，仅在新模块中使用",
+      "pronunciation_score": {
+        "excellent":    { "color": "#4CAF50", "usage": "评分 ≥90 — 优秀/绿色",         "material_ref": "M3 Green (md_theme_green)" },
+        "good":         { "color": "#FFC107", "usage": "评分 75-89 — 良好/黄色",        "material_ref": "M3 Yellow (md_theme_yellow)" },
+        "needs_improvement": { "color": "#F44336", "usage": "评分 <75 — 需改进/红色",    "material_ref": "M3 Red (md_theme_red)" }
+      },
+      "phoneme_marking": {
+        "correct":      { "color": "#4CAF50", "alpha": 0.85, "usage": "音素发音正确标记 — 绿色" },
+        "borderline":   { "color": "#FFC107", "alpha": 0.85, "usage": "音素偏差/基本合格标记 — 黄色 (GOP 0.5-0.7)" },
+        "incorrect":    { "color": "#F44336", "alpha": 0.85, "usage": "音素发音错误标记 — 红色 (GOP <0.5)" },
+        "omitted":      { "color": "#9E9E9E", "alpha": 0.60, "usage": "漏读词标记 — 灰色删除线" },
+        "extra_added":  { "color": "#42A5F5", "usage": "额外添加词标记 — 蓝色" }
+      },
+      "subtitle": {
+        "active":       { "color": "#FFFFFF", "usage": "当前活动字幕 — 纯白高亮" },
+        "past":         { "color": "#808080", "usage": "已过字幕 — 灰色" },
+        "future":       { "color": "#B0B0B0", "usage": "未到字幕 — 浅灰" },
+        "shadow_color": { "color": "#000000", "alpha": 0.80, "usage": "字幕文字阴影色" },
+        "bg_overlay":   { "color": "#000000", "alpha": 0.50, "usage": "字幕区域背景半透明遮罩" }
+      },
+      "recording_button": {
+        "idle_bg":          { "color": "#6C9FFF", "alpha": 1.0, "usage": "待机状态 — 主色蓝圆钮" },
+        "idle_icon":        { "color": "#FFFFFF", "usage": "待机状态麦克风图标 — 白色" },
+        "recording_bg":     { "color": "#F44336", "alpha": 1.0, "usage": "录音中状态 — 红色脉冲圆钮" },
+        "recording_icon":   { "color": "#FFFFFF", "usage": "录音中图标 — 白色" },
+        "recording_pulse":  { "color": "#F44336", "alpha": 0.30, "usage": "录音中脉冲环 — 红色半透明" },
+        "completed_bg":     { "color": "#4CAF50", "alpha": 1.0, "usage": "完成状态 — 绿色确认圆钮" },
+        "completed_icon":   { "color": "#FFFFFF", "usage": "完成状态勾选图标 — 白色" }
+      },
+      "progress": {
+        "shadowing_progress_bar":       { "color": "#6C9FFF", "usage": "跟读进度条 — 主色蓝" },
+        "shadowing_progress_track":     { "color": "#333333", "usage": "进度条轨道 — 深灰" },
+        "assessment_progress_bar":      { "color": "#8AB4F8", "usage": "测评进度 — 辅色蓝" },
+        "score_trend_line":             { "color": "#4CAF50", "usage": "进步折线图线条 — 绿色" },
+        "score_trend_fill":             { "color": "#4CAF50", "alpha": 0.15, "usage": "折线图填充区域" },
+        "error_phoneme_chart":          { "color": "#F44336", "usage": "错误音素统计图 — 红色" }
+      },
+      "comparison_playback": {
+        "original_audio_indicator":     { "color": "#6C9FFF", "usage": "原音播放标识 — 主色蓝" },
+        "user_audio_indicator":         { "color": "#8AB4F8", "usage": "用户录音播放标识 — 辅色蓝" }
+      }
+    },
+
+    "dark_surface_hierarchy": {
+      "level_0_base":         "#1A1A1A",
+      "level_1_surface":      "#2A2A2A",
+      "level_2_elevated":     "#323232",
+      "level_3_modal":        "#383838",
+      "level_4_dialog":       "#3D3D3D",
+      "usage_note": "新模块统一使用此层级栈。视频列表卡片用 level_2(32)，弹窗/底部面板用 level_3(38) 和 level_4(3D)"
+    }
+  },
+
+  "typography": {
+    "strategy": "扩展现有 Material3 Typography，新增模块专用 text styles。字体系列沿用现有默认字体 (Roboto/系统无衬线体)",
+    "inherited": {
+      "body_large":       { "size": 16, "sp": true, "weight": "Normal",   "line_height": 24, "usage": "常规正文" },
+      "body_medium":      { "size": 14, "sp": true, "weight": "Normal",   "line_height": 20, "usage": "辅助正文" },
+      "body_small":       { "size": 12, "sp": true, "weight": "Normal",   "line_height": 16, "usage": "标注/说明" },
+      "label_large":      { "size": 14, "sp": true, "weight": "Medium",   "usage": "按钮文字" },
+      "label_medium":     { "size": 12, "sp": true, "weight": "Medium",   "usage": "小按钮/标签" },
+      "label_small":      { "size": 11, "sp": true, "weight": "Medium",   "usage": "极小标签" }
+    },
+    "new_styles": {
+      "module_title": {
+        "size": 20, "sp": true, "weight": "SemiBold", "line_height": 28,
+        "usage": "模块页面大标题（如\"影子跟读\"\"发音测评\"\"进步追踪\"）",
+        "color": "on_background"
+      },
+      "section_title": {
+        "size": 16, "sp": true, "weight": "Medium", "line_height": 22,
+        "usage": "区块标题（如\"录音列表\"\"测评结果\"\"纠正建议\"）",
+        "color": "on_surface"
+      },
+      "subtitle_text": {
+        "size": 16, "sp": true, "weight": "Normal", "line_height": 22,
+        "usage": "字幕文本 — 主尺寸（视频下方同步字幕，可调范围 16-18sp）",
+        "color": "subtitle.active (#FFFFFF)"
+      },
+      "subtitle_past": {
+        "size": 16, "sp": true, "weight": "Normal", "line_height": 22,
+        "usage": "已过字幕文本 — 灰色",
+        "color": "subtitle.past (#808080)"
+      },
+      "subtitle_future": {
+        "size": 16, "sp": true, "weight": "Normal", "line_height": 22,
+        "usage": "未到字幕文本 — 浅灰",
+        "color": "subtitle.future (#B0B0B0)"
+      },
+      "subtitle_sentence_active": {
+        "size": 18, "sp": true, "weight": "SemiBold", "line_height": 26,
+        "usage": "当前句子字幕 — 跟读模式高亮当前句",
+        "color": "subtitle.active (#FFFFFF)"
+      },
+      "score_digit": {
+        "size": 48, "sp": true, "weight": "Bold", "line_height": 56,
+        "usage": "测评结果页顶部大数字评分",
+        "color": "dynamic (依分数段取 pronunciation_score.*)"
+      },
+      "score_label": {
+        "size": 14, "sp": true, "weight": "Medium", "letter_spacing": 1,
+        "usage": "评分等级标签（\"优秀\"\"良好\"\"需改进\"）",
+        "color": "on_surface_variant"
+      },
+      "phoneme_text": {
+        "size": 16, "sp": true, "weight": "Normal",
+        "usage": "音素级标记文本（带颜色高亮的句子）",
+        "note": "每个音素/字母可独立着色，颜色取自 phoneme_marking"
+      },
+      "correction_suggestion": {
+        "size": 13, "sp": true, "weight": "Normal", "line_height": 20,
+        "usage": "纠正建议正文 — 具体舌位/口型描述",
+        "color": "on_surface_variant"
+      },
+      "trend_chart_label": {
+        "size": 11, "sp": true, "weight": "Normal",
+        "usage": "折线图/柱状图坐标轴标签",
+        "color": "on_surface_variant"
+      },
+      "video_card_title": {
+        "size": 15, "sp": true, "weight": "Medium", "line_height": 20,
+        "usage": "视频卡片标题（视频列表页）",
+        "color": "on_surface",
+        "max_lines": 2,
+        "ellipsis": "end"
+      },
+      "video_card_meta": {
+        "size": 12, "sp": true, "weight": "Normal",
+        "usage": "视频卡片元信息（时长/进度等）",
+        "color": "on_surface_variant"
+      }
+    }
+  },
+
+  "video_subtitle_readability": {
+    "strategy": "暗色背景上白字字幕的可读性保障 — 双层保护方案（阴影 + 背景半透明遮罩）",
+    "presets": {
+      "default": {
+        "mode": "drop_shadow_only",
+        "text_shadow": {
+          "color": "#000000",
+          "alpha": 0.80,
+          "offset_x": 1,
+          "offset_y": 1,
+          "blur_radius": 3
+        },
+        "background": "无 — 纯阴影方案，不遮挡视频画面",
+        "適用场景": "视频播放区字幕（全屏/宽屏模式下）"
+      },
+      "high_contrast": {
+        "mode": "shadow_plus_overlay",
+        "text_shadow": {
+          "color": "#000000",
+          "alpha": 0.90,
+          "offset_x": 1,
+          "offset_y": 1,
+          "blur_radius": 3
+        },
+        "background_overlay": {
+          "color": "#000000",
+          "alpha": 0.50,
+          "border_radius": 4,
+          "padding_horizontal": 8,
+          "padding_vertical": 2
+        },
+        "適用场景": "视频画面亮色区域较多时，阴影可能不足以保证可读性"
+      },
+      "sentence_focus": {
+        "mode": "overlay_only",
+        "background_overlay": {
+          "color": "#000000",
+          "alpha": 0.50,
+          "border_radius": 8,
+          "padding_horizontal": 12,
+          "padding_vertical": 6
+        },
+        "text_shadow": "无（背景遮罩已足够）",
+        "適用场景": "跟读模式当前句高亮展示 — 句子在独立遮罩区内显示"
+      }
+    },
+    "implementation_note": "方案选择逻辑：默认使用 drop_shadow_only 最小化遮挡 -> 检测视频画面brightness过高时自动切换至 high_contrast -> 跟读模式强制使用 sentence_focus。字幕区域位于视频画面底部1/4区域。",
+    "dynamic_brightness_detection": "v2可选：对当前帧底部1/4区域采样平均亮度，若Luma>180则自动从 default 切换到 high_contrast 方案"
+  },
+
+  "recording_button_visual_states": {
+    "strategy": "一个大圆钮表达所有录音状态，通过颜色转换 + 微动效传递状态语义，避免冗余文字标签",
+    "base_specs": {
+      "diameter": 72,
+      "diameter_dp": 72,
+      "shape": "圆形 (Circle)",
+      "icon_size": 28,
+      "interaction": "Push-to-Talk — 按住开始/松开即停"
+    },
+    "states": [
+      {
+        "state": "idle (待机)",
+        "trigger": "初始状态 / 录音完成后复位",
+        "appearance": {
+          "background_color": "#6C9FFF",
+          "icon": "mic (麦克风)",
+          "icon_color": "#FFFFFF",
+          "elevation": 4,
+          "scale": 1.0,
+          "animations": "无"
+        }
+      },
+      {
+        "state": "recording (录音中)",
+        "trigger": "用户长按按住",
+        "appearance": {
+          "background_color": "#F44336",
+          "icon": "mic (麦克风)",
+          "icon_color": "#FFFFFF",
+          "elevation": 8,
+          "scale": 1.05,
+          "animations": [
+            {
+              "type": "pulse_ring",
+              "description": "从按钮向外扩散的脉冲环，半径从 72dp 扩大到 120dp 再回缩",
+              "ring_color": "#F44336",
+              "ring_alpha_start": 0.30,
+              "ring_alpha_end": 0.0,
+              "duration_ms": 1200,
+              "repeat": "infinite",
+              "easing": "ease-out"
+            },
+            {
+              "type": "ripple_on_press",
+              "description": "水波涟漪动效表示正在拾音",
+              "origin": "手指按压点"
+            }
+          ]
+        }
+      },
+      {
+        "state": "completed (完成)",
+        "trigger": "松开手指，录音成功保存",
+        "appearance": {
+          "background_color": "#4CAF50",
+          "icon": "check_circle (勾选圆圈)",
+          "icon_color": "#FFFFFF",
+          "elevation": 2,
+          "scale": 1.0,
+          "animations": [
+            {
+              "type": "success_pop",
+              "description": "短暂缩放到1.1x再回弹到1.0x，表示成功完成",
+              "duration_ms": 300,
+              "easing": "spring"
+            }
+          ],
+          "auto_transition": "录音完成后保持 completed 状态2秒，然后自动回到 idle"
+        }
+      },
+      {
+        "state": "error (错误)",
+        "trigger": "录音失败（权限拒绝/存储失败等）",
+        "appearance": {
+          "background_color": "#F44336",
+          "icon": "error_outline (警告三角)",
+          "icon_color": "#FFFFFF",
+          "animations": [
+            {
+              "type": "shake",
+              "description": "水平抖动动效表示异常",
+              "duration_ms": 400,
+              "amplitude": 4
+            }
+          ],
+          "auto_transition": "保持 error 状态直到用户操作（点击重试按钮）"
+        }
+      }
+    ],
+    "accessory_indicators": {
+      "recording_timer": {
+        "visible_when": "recording 状态",
+        "position": "按钮正上方",
+        "typography": "body_medium",
+        "format": "MM:SS / SS.s",
+        "color": "#F44336"
+      },
+      "recording_waveform": {
+        "visible_when": "recording 状态",
+        "position": "按钮与句子文本之间",
+        "description": "实时音频波形可视化，高度约 40dp，颜色 #6C9FFF",
+        "implementation": "AudioRecord.getMaxAmplitude() 驱动的 Compose Canvas 自绘"
+      }
+    }
+  },
+
+  "pronunciation_assessment_color_semantics": {
+    "score_grading": [
+      { "range": "≥ 90",   "color": "#4CAF50", "color_name": "green",         "label": "优秀",    "phoneme_threshold": "GOP > 0.7" },
+      { "range": "75-89",  "color": "#FFC107", "color_name": "yellow/amber",  "label": "良好",    "phoneme_threshold": "GOP 0.5-0.7" },
+      { "range": "60-74",  "color": "#FF9800", "color_name": "orange",        "label": "一般",    "phoneme_threshold": "GOP 0.3-0.5" },
+      { "range": "< 60",   "color": "#F44336", "color_name": "red",           "label": "需改进",  "phoneme_threshold": "GOP < 0.3" }
+    ],
+    "semantic_use_cases": {
+      "score_digit_color": "大数字评分颜色取对应 range 的 color 值",
+      "score_badge_color": "评分卡片背景取对应 color 值 10% alpha 的浅色版本",
+      "phoneme_text_highlight": "句中每个音素/字母独立着色（correct/borderline/incorrect）",
+      "trend_chart_above_75": "折线图中 ≥75 的区域背景填充为绿色(15% alpha)",
+      "trend_chart_below_75": "折线图中 <75 的区域背景填充为红色(15% alpha)"
+    }
+  },
+
+  "componet_specs": {
+    "video_card": {
+      "elevation": 2,
+      "shape": "rounded_corner (12dp)",
+      "background": "#323232",
+      "thumbnail_aspect_ratio": "16:9",
+      "thumbnail_placeholder": "surface_variant (#333) 色块 + 播放图标",
+      "padding": {"horizontal": 16, "vertical": 12},
+      "content_layout": "顶部封面图(16:9) + 下方标题+元信息行",
+      "progress_bar": {
+        "height": 3,
+        "color": "#6C9FFF",
+        "track_color": "#333333",
+        "position": "封面图底部边缘覆盖"
+      }
+    },
+    "sentence_timeline": {
+      "item_height": 48,
+      "active_item_background": "#2A2A2A with start border #6C9FFF (3dp left border)",
+      "inactive_item_background": "transparent",
+      "divider_color": "#333333",
+      "divider_height": 0.5,
+      "timestamp_color": "#808080",
+      "timestamp_typography": "body_small"
+    },
+    "assessment_result_card": {
+      "background": "#2A2A2A",
+      "border_radius": 16,
+      "elevation": 4,
+      "padding": 20,
+      "score_area": {
+        "alignment": "center",
+        "digit": "score_digit style",
+        "label": "score_label style positioned below digit",
+        "badge_background": "取评分对应 color 的 10% alpha 值"
+      }
+    },
+    "correction_suggestion_card": {
+      "background": "#323232",
+      "border_radius": 12,
+      "start_border_color": "#6C9FFF",
+      "start_border_width": 3,
+      "padding": 16,
+      "icon": "tips_and_updates / lightbulb",
+      "icon_color": "#6C9FFF",
+      "icon_size": 20
+    },
+    "trend_chart_card": {
+      "background": "#2A2A2A",
+      "border_radius": 16,
+      "padding": 16,
+      "line_color": "#4CAF50",
+      "line_width": 2,
+      "fill_alpha": 0.15,
+      "grid_color": "#333333",
+      "label_color": "#808080"
+    },
+    "phoneme_error_chart": {
+      "type": "horizontal_bar_chart",
+      "background": "#2A2A2A",
+      "bar_colors": {
+        "most_frequent": "#F44336",
+        "frequent": "#FF9800",
+        "occasional": "#FFC107"
+      },
+      "bar_height": 20,
+      "border_radius": 4,
+      "label_color": "#E0E0E0"
+    },
+    "import_dialog": {
+      "background": "#383838",
+      "border_radius": 20,
+      "padding": 24,
+      "button_height": 48,
+      "button_background": "#333333",
+      "button_selected_background": "#6C9FFF"
+    }
+  },
+
+  "spacing_and_layout": {
+    "grid": {
+      "base_unit": 4,
+      "standard_padding": 16,
+      "card_gap": 12,
+      "section_gap": 24,
+      "list_item_gap": 8
+    },
+    "video_player_layout": {
+      "player_ratio": "16:9",
+      "subtitle_area": {
+        "position": "视频画面底部 25% 区域",
+        "max_lines": 2,
+        "alignment": "center"
+      },
+      "control_bar_height": 48,
+      "control_icon_size": 24
+    },
+    "shadowing_mode_layout": {
+      "layout": "vertical split",
+      "player_region": "上部 40% — 缩小版视频窗口",
+      "sentence_list_region": "中部 35% — 可滚动句子时间轴",
+      "control_region": "底部 25% — 录音按钮 + 回放控制 + 进度指示",
+      "recording_button_position": "底部居中"
+    },
+    "assessment_result_layout": {
+      "layout": "vertical scroll",
+      "score_banner": "顶部区域 — 大数字 + 等级 + 评分卡片",
+      "phoneme_text": "中部区域 — 带颜色标记的句子原文",
+      "corrections": "下部区域 — 纠正建议卡片列表（可折叠/展开）",
+      "action_bar": "底部固定 — 重新录音 + 分享按钮"
+    },
+    "trend_tracking_layout": {
+      "layout": "vertical scroll",
+      "summary_row": "顶部概览行（总测评次数/平均分/最高分）",
+      "trend_chart": "折线图区域 (高度 200dp)",
+      "phoneme_stat_chart": "错误音素统计图区域 (高度可变)",
+      "recent_records": "最近测评记录列表"
+    }
+  },
+
+  "dark_mode_specific_guidelines": {
+    "general": [
+      "所有表面使用 #2A (#2A2A2A) 系列灰阶，避免纯黑(#000) — 保证层次感",
+      "文字使用纯白(#FFF)为最高层级、#E0E0E0为常规、#A0A0A0为辅助、#808080为禁用",
+      "分割线/边框使用 #444 或 #333，避免过于突兀的高亮边框",
+      "所有阴影/光效应使用微妙柔光，避免过度发光影响暗色沉浸感",
+      "禁用纯白色的纯色填充表面 — 所有表面必须为深色系"
+    ],
+    "video_playback_dark": [
+      "视频播放器控件使用 Material3 深色主题默认样式",
+      "进度条红点（当前播放位置）使用 #6C9FFF 替换默认红色",
+      "播放/暂停/快进/快退图标使用半透明白色 (#FFFFFF 80%)",
+      "播放控制栏背景：#1A1A1A 80% 透明度",
+      "全屏模式下隐藏状态栏和导航栏，实现真正的沉浸暗色"
+    ],
+    "accessibility_constraints": [
+      "评分语义色的对比度需满足 WCAG AA 标准（对比度 ≥4.5:1）",
+      "绿色(#4CAF50) 在 #1A1A1A 背景上对比度约 5.2:1 ✅",
+      "黄色(#FFC107) 在 #1A1A1A 背景上对比度约 10.8:1 ✅",
+      "红色(#F44336) 在 #1A1A1A 背景上对比度约 5.5:1 ✅",
+      "字幕白字(#FFFFFF) + 黑色阴影(#000 80%)在视频任意背景上均满足 AAA 标准",
+      "音素标记颜色不单独作为唯一信息载体 — 配合文本样式变更（加粗/下划线）辅助传达"
+    ]
+  },
+
+  "animation_and_motion": {
+    "duration": {
+      "instant": 100,
+      "fast": 200,
+      "normal": 300,
+      "slow": 500,
+      "emphasis": 800
+    },
+    "easing": {
+      "standard":     "cubic-bezier(0.4, 0.0, 0.2, 1)",
+      "decelerate":   "cubic-bezier(0.0, 0.0, 0.2, 1)",
+      "accelerate":   "cubic-bezier(0.4, 0.0, 1, 1)",
+      "spring":        "spring(dampingRatio=0.6, stiffness=300)"
+    },
+    "module_specific_animations": [
+      {
+        "name": "录音按钮脉冲环",
+        "trigger": "recording 状态",
+        "target": "recording_button",
+        "type": "pulse_ring_infinite",
+        "duration": 1200,
+        "easing": "decelerate",
+        "description": "从按钮边缘向外扩散的环状脉冲"
+      },
+      {
+        "name": "音素错误闪烁",
+        "trigger": "assessment result 展示",
+        "target": "phoneme_text.incorrect",
+        "type": "gentle_pulse",
+        "duration": 1500,
+        "repeat": 3,
+        "description": "标记为红色的错误音素轻微闪烁以吸引注意"
+      },
+      {
+        "name": "评分数字动画",
+        "trigger": "assessment result 加载完成",
+        "target": "score_digit",
+        "type": "count_up",
+        "duration": 800,
+        "easing": "decelerate",
+        "description": "评分数字从0递增到最终分数"
+      },
+      {
+        "name": "句子切换滑入",
+        "trigger": "next/previous sentence",
+        "target": "sentence_text",
+        "type": "slide_in_from_side",
+        "duration": 200,
+        "easing": "standard",
+        "description": "上下句切换时以水平滑入/滑出过渡"
+      },
+      {
+        "name": "回放源切换指示",
+        "trigger": "original <-> user audio toggle",
+        "target": "playback_indicator",
+        "type": "crossfade",
+        "duration": 200,
+        "description": "原音/用户录音播放标识淡入淡出切换"
+      },
+      {
+        "name": "成功录音回弹",
+        "trigger": "recording completed",
+        "target": "recording_button",
+        "type": "success_bounce",
+        "duration": 300,
+        "easing": "spring",
+        "description": "按钮从 recording_red → completed_green 时伴随弹性回弹"
+      },
+      {
+        "name": "视频卡片进场",
+        "trigger": "video list loaded",
+        "target": "video_card",
+        "type": "fade_in_slide_up",
+        "duration": 300,
+        "stagger_delay": 50,
+        "easing": "decelerate",
+        "description": "视频列表卡片逐个淡入上滑"
+      }
+    ]
+  },
+
+  "iconography": {
+    "strategy": "统一使用 Material Design Icons (Material3 默认图标集)，避免自定义图标以保持与现有界面一致",
+    "module_icons": {
+      "shadowing_entry":          "mic_external_on / record_voice_over",
+      "video_list":               "video_library",
+      "import_video":             "add_circle_outline",
+      "import_bilibili":          "link / download",
+      "import_local":             "folder_open",
+      "play":                     "play_arrow",
+      "pause":                    "pause",
+      "forward_10s":              "forward_10",
+      "rewind_10s":               "replay_10",
+      "shadowing_mode":           "record_voice_over",
+      "recording_idle":           "mic",
+      "recording_active":         "mic",
+      "recording_completed":      "check_circle",
+      "play_original":            "volume_up",
+      "play_user":                "person",
+      "loop_compare":             "repeat",
+      "next_sentence":            "skip_next",
+      "prev_sentence":            "skip_previous",
+      "pronunciation_entry":      "g_translate / translate",
+      "start_assessment":         "psychology / auto_awesome",
+      "correction_tip":           "tips_and_updates / lightbulb",
+      "trend_chart":              "trending_up / show_chart",
+      "phoneme_library":          "abc / text_to_speech",
+      "score_excellent":          "sentiment_very_satisfied",
+      "score_good":               "sentiment_satisfied",
+      "score_needs_improvement":  "sentiment_dissatisfied",
+      "delete":                   "delete_outline",
+      "share":                    "share",
+      "retry":                    "replay",
+      "add_to_wordbank":          "playlist_add",
+      "sentence_edit":            "edit"
+    }
+  },
+
+  "chapter_titles": {
+    "enabled": true,
+    "format": "模块名称 — 页面名称",
+    "examples": [
+      "影子跟读 — 视频列表",
+      "影子跟读 — 视频播放",
+      "影子跟读 — 跟读模式",
+      "发音测评 — 录音选择",
+      "发音测评 — 测评结果",
+      "发音测评 — 进步追踪"
+    ],
+    "style": "module_title"
+  },
+
+  "migration_compatibility": {
+    "existing_modules_impact": "无影响 — 新模块仅新增组件和颜色，不替换现有主题变量",
+    "theme_extension_method": "在现有 darkColorScheme 上通过 copy() 扩展新语义色，不走 ThemeOverlay",
+    "version_bump_note": "色彩/排版/间距体系完全向后兼容，无需修改v7现有页面的样式"
+  }
+}

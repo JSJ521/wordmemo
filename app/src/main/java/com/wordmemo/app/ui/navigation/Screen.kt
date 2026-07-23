@@ -30,4 +30,23 @@ sealed class Screen(val route: String, val title: String = "", val icon: ImageVe
     }
     data object Stats : Screen("stats", "统计", Icons.Default.BarChart)
     data object Ocr : Screen("ocr", "OCR扫描", Icons.Default.TextSnippet)
+
+    // S2 影子跟读
+    data object ShadowingHome : Screen("shadowing_home", "影子跟读", Icons.Default.PlayCircle)
+    data class ShadowingSession(val videoId: Long) : Screen("shadowing_session/{videoId}", "跟读练习") {
+        companion object {
+            const val ROUTE = "shadowing_session/{videoId}"
+            fun createRoute(videoId: Long) = "shadowing_session/$videoId"
+        }
+    }
+
+    // S2 发音测评
+    data object AssessmentHome : Screen("assessment_home", "发音测评", Icons.Default.RecordVoiceOver)
+    data class AssessmentResult(val assessmentId: Long) : Screen("assessment_result/{assessmentId}", "测评结果") {
+        companion object {
+            const val ROUTE = "assessment_result/{assessmentId}"
+            fun createRoute(assessmentId: Long) = "assessment_result/$assessmentId"
+        }
+    }
+    data object Progress : Screen("progress", "学习进度", Icons.Default.TrendingUp)
 }

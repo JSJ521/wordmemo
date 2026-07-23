@@ -1,0 +1,497 @@
+{
+  "meta": {
+    "document_name": "词鼠书记 影子跟读 + 发音测评 架构蓝图",
+    "document_id": "ARCH_BLUEPRINT_v1",
+    "version": "v1",
+    "app_name": "词鼠书记 (WordMemo)",
+    "app_version": "v7 → v8 (versionCode=80000)",
+    "target_modules": ["M1 影子跟读学习模块", "M2 发音测评与纠正模块"],
+    "date": "2026-07-22",
+    "author": "Hermes Agent / subagent",
+    "status": "draft",
+    "approval": "pending"
+  },
+  "modules": [
+    {
+      "module_id": "M1",
+      "module_name": "影子跟读学习模块",
+      "module_name_en": "Shadowing Learning Module",
+      "risk_level": "高",
+      "description": "用户导入B站/本地视频，使用Media3播放，配合句子级字幕进行逐句跟读录音与回放对比"
+    },
+    {
+      "module_id": "M2",
+      "module_name": "发音测评与纠正模块",
+      "module_name_en": "Pronunciation Assessment & Correction Module",
+      "risk_level": "中",
+      "description": "基于DeepSeek API的文本级发音分析，提供整体评分+音素级差异定位+纠正建议"
+    }
+  ],
+  "package_structure": {
+    "top_level": "com.wordmemo.app",
+    "data": {
+      "shadowing": {
+        "dao": ["ShadowingVideoDao", "ShadowingSentenceDao", "ShadowingRecordDao"],
+        "entity": ["ShadowingVideoEntity", "ShadowingSentenceEntity", "ShadowingRecordEntity"],
+        "service": ["VideoImportService"],
+        "crypto": ["RecordingCryptoManager"]
+      },
+      "pronunciation": {
+        "dao": ["AssessmentRecordDao", "PhonemeScoreDao"],
+        "entity": ["AssessmentRecordEntity", "PhonemeScoreEntity"]
+      },
+      "local": {
+        "database": "WordMemoDatabase.kt (新增Entity注册+版本迁移)",
+        "dao_shared": "AppConfigDao (复用, 获取API Key等配置)"
+      }
+    },
+    "domain": {
+      "shadowing": {
+        "repository": "ShadowingRepository",
+        "model": ["ShadowingVideo", "ShadowingSentence", "ShadowingRecord"],
+        "usecase": ["ImportVideoUseCase", "DeleteVideoUseCase", "SaveRecordingUseCase", "GetRecordingsUseCase"]
+      },
+      "pronunciation": {
+        "repository": "PronunciationRepository",
+        "model": ["PronunciationAssessment", "PhonemeScore", "AssessmentRecord", "WordTiming"],
+        "service": ["PronunciationAssessor"],
+        "usecase": ["AssessPronunciationUseCase", "TranscribeAudioUseCase", "GenerateCorrectionUseCase", "GetAssessmentHistoryUseCase"],
+        "audio": {
+          "phoneme_reference": "assets/audio/phonemes/ (44个IPA音素标准发音.mp3)"
+        }
+      },
+      "common": {
+        "ai": "AiApiClient (复用现有DeepSeek API调用基础设施)"
+      }
+    },
+    "ui": {
+      "shadowing": {
+        "navigation": "ShadowingScreen路由注册到Screen.kt + NavGraph.kt",
+        "viewmodel": "ShadowingViewModel",
+        "screens": ["ShadowingListScreen(视频列表页)", "ShadowingPlayerScreen(播放+字幕页)", "ShadowingPracticeScreen(跟读录音页)"],
+        "components": ["VideoPlayerView", "SubtitleOverlay", "RecordingControlBar", "SentenceTimeline", "WaveformView"]
+      },
+      "pronunciation": {
+        "navigation": "PronunciationScreen路由注册",
+        "viewmodel": "PronunciationViewModel",
+        "screens": ["PronunciationHomeScreen(测评入口)", "PronunciationResultScreen(评分结果展示)"],
+        "components": ["PhonemeHighlightText", "CorrectionSuggestionCard", "ScoreGauge", "TrendChart", "PhonemeReferenceBrowser"]
+      }
+    },
+    "di": {
+      "modules": ["ShadowingModule", "PronunciationModule"],
+      "existing_updated": ["DatabaseModule.kt(新增DAO绑定)", "NetworkModule.kt(复用OkHttpClient)"]
+    }
+  },
+  "tech_stack_additions": [
+    {
+      "library": "androidx.media3:media3-exoplayer",
+      "version": "1.2.0+",
+      "module": "M1",
+      "purpose": "视频播放 — 支持本地mp4/mkv/webm解码、字幕渲染、变速播放",
+      "notes": "Media3是ExoPlayer的Jetpack迁移版本"
+    },
+    {
+      "library": "androidx.media3:media3-ui",
+      "version": "1.2.0+",
+      "module": "M1",
+      "purpose": "播放器UI组件 — PlayerView、子标题渲染器等",
+      "notes": "提供SubtitleView用于SRT/VTT字幕同步显示"
+    },
+    {
+      "library": "com.github.yausername:youtubedl-android",
+      "version": "latest",
+      "module": "M1",
+      "purpose": "B站视频下载 — yt-dlp的Android wrapper",
+      "notes": "下载文件写入应用私有目录"
+    },
+    {
+      "library": "com.github.yausername:ffmpeg-android",
+      "version": "latest",
+      "module": "M1",
+      "purpose": "音视频处理 — 音频提取、格式转换",
+      "notes": "可选依赖"
+    },
+    {
+      "library": "com.github.PhilJay:MPAndroidChart",
+      "version": "v3.1.0",
+      "module": "M2",
+      "purpose": "评分趋势图 — 进步折线图、错误音素分布图",
+      "notes": "可选依赖; 也可用Compose Canvas自绘"
+    },
+    {
+      "library": "androidx.security:security-crypto",
+      "version": "1.1.0-alpha06",
+      "module": "M1+M2",
+      "purpose": "录音文件加密存储 — EncryptedFile (AES256-GCM)",
+      "notes": "项目已声明此依赖, 新增Module直接复用"
+    }
+  ],
+  "new_tables": [
+    {
+      "table_name": "shadowing_videos",
+      "module": "M1",
+      "description": "视频元数据表 — 存储已导入视频的基本信息",
+      "columns": [
+        {"name": "id", "type": "INTEGER", "constraints": "PRIMARY KEY AUTOINCREMENT"},
+        {"name": "title", "type": "TEXT", "constraints": "NOT NULL"},
+        {"name": "source_type", "type": "TEXT", "constraints": "NOT NULL"},
+        {"name": "source_url", "type": "TEXT"},
+        {"name": "file_path", "type": "TEXT", "constraints": "NOT NULL"},
+        {"name": "cover_path", "type": "TEXT"},
+        {"name": "duration_ms", "type": "INTEGER", "constraints": "NOT NULL"},
+        {"name": "file_size_bytes", "type": "INTEGER"},
+        {"name": "sentence_count", "type": "INTEGER", "default": "0"},
+        {"name": "completed_count", "type": "INTEGER", "default": "0"},
+        {"name": "last_practice_time", "type": "INTEGER"},
+        {"name": "created_at", "type": "INTEGER", "constraints": "NOT NULL"},
+        {"name": "updated_at", "type": "INTEGER", "constraints": "NOT NULL"}
+      ],
+      "indexes": ["INDEX idx_shadowing_videos_created_at ON shadowing_videos(created_at DESC)"]
+    },
+    {
+      "table_name": "shadowing_sentences",
+      "module": "M1",
+      "description": "句子分割表 — 存储视频的句子级时间轴字幕",
+      "columns": [
+        {"name": "id", "type": "INTEGER", "constraints": "PRIMARY KEY AUTOINCREMENT"},
+        {"name": "video_id", "type": "INTEGER", "constraints": "NOT NULL REFERENCES shadowing_videos(id) ON DELETE CASCADE"},
+        {"name": "sentence_index", "type": "INTEGER", "constraints": "NOT NULL"},
+        {"name": "text", "type": "TEXT", "constraints": "NOT NULL"},
+        {"name": "start_time_ms", "type": "INTEGER", "constraints": "NOT NULL"},
+        {"name": "end_time_ms", "type": "INTEGER", "constraints": "NOT NULL"},
+        {"name": "is_merged", "type": "INTEGER", "default": "0"},
+        {"name": "created_at", "type": "INTEGER", "constraints": "NOT NULL"}
+      ],
+      "indexes": ["INDEX idx_shadowing_sentences_video ON shadowing_sentences(video_id, sentence_index)"]
+    },
+    {
+      "table_name": "shadowing_records",
+      "module": "M1",
+      "description": "跟读记录表 — 用户对每个句子的跟读录音记录",
+      "columns": [
+        {"name": "id", "type": "INTEGER", "constraints": "PRIMARY KEY AUTOINCREMENT"},
+        {"name": "video_id", "type": "INTEGER", "constraints": "NOT NULL REFERENCES shadowing_videos(id) ON DELETE CASCADE"},
+        {"name": "sentence_id", "type": "INTEGER", "constraints": "NOT NULL REFERENCES shadowing_sentences(id) ON DELETE CASCADE"},
+        {"name": "audio_file_path", "type": "TEXT", "constraints": "NOT NULL"},
+        {"name": "duration_ms", "type": "INTEGER", "constraints": "NOT NULL"},
+        {"name": "created_at", "type": "INTEGER", "constraints": "NOT NULL"},
+        {"name": "pronunciation_status", "type": "INTEGER", "default": "0"}
+      ],
+      "indexes": [
+        "INDEX idx_shadowing_records_sentence ON shadowing_records(sentence_id)",
+        "INDEX idx_shadowing_records_video ON shadowing_records(video_id)"
+      ],
+      "notes": "pronunciation_status字段预留供M2发音测评模块使用, 实现跨模块数据关联"
+    },
+    {
+      "table_name": "assessment_records",
+      "module": "M2",
+      "description": "测评记录表 — 每次发音测评的结果主记录",
+      "columns": [
+        {"name": "id", "type": "INTEGER", "constraints": "PRIMARY KEY AUTOINCREMENT"},
+        {"name": "record_id", "type": "INTEGER", "constraints": "REFERENCES shadowing_records(id) ON DELETE SET NULL"},
+        {"name": "sentence_id", "type": "INTEGER", "constraints": "REFERENCES shadowing_sentences(id) ON DELETE SET NULL"},
+        {"name": "sentence_text", "type": "TEXT", "constraints": "NOT NULL"},
+        {"name": "transcribed_text", "type": "TEXT"},
+        {"name": "overall_score", "type": "INTEGER", "constraints": "NOT NULL"},
+        {"name": "score_level", "type": "TEXT", "constraints": "NOT NULL"},
+        {"name": "diagnostic_report", "type": "TEXT"},
+        {"name": "correction_suggestions", "type": "TEXT"},
+        {"name": "assessment_type", "type": "TEXT", "constraints": "NOT NULL DEFAULT 'shadowing'"},
+        {"name": "created_at", "type": "INTEGER", "constraints": "NOT NULL"}
+      ],
+      "indexes": [
+        "INDEX idx_assessment_records_record ON assessment_records(record_id)",
+        "INDEX idx_assessment_records_sentence ON assessment_records(sentence_id)",
+        "INDEX idx_assessment_records_created ON assessment_records(created_at DESC)"
+      ]
+    },
+    {
+      "table_name": "phoneme_scores",
+      "module": "M2",
+      "description": "音素评分明细表 — 每次测评中各个音素的评分详情",
+      "columns": [
+        {"name": "id", "type": "INTEGER", "constraints": "PRIMARY KEY AUTOINCREMENT"},
+        {"name": "assessment_id", "type": "INTEGER", "constraints": "NOT NULL REFERENCES assessment_records(id) ON DELETE CASCADE"},
+        {"name": "phoneme", "type": "TEXT", "constraints": "NOT NULL"},
+        {"name": "position_in_word", "type": "INTEGER"},
+        {"name": "word_index", "type": "INTEGER"},
+        {"name": "gop_score", "type": "REAL", "constraints": "NOT NULL"},
+        {"name": "color_tag", "type": "TEXT", "constraints": "NOT NULL"},
+        {"name": "correction_hint", "type": "TEXT"}
+      ],
+      "indexes": ["INDEX idx_phoneme_scores_assessment ON phoneme_scores(assessment_id)"]
+    }
+  ],
+  "database_migration": {
+    "current_version": "待确认(需读取Room @Database version)",
+    "target_version": "current + 1",
+    "migration_strategy": "使用Room Migration类新增5张表, 不修改现有表结构",
+    "fallback": "开发阶段可用destructiveMigrationFallback(), 发布前必须提供正式Migration"
+  },
+  "data_flow_diagram": {
+    "M1_shadowing_flow": {
+      "description": "影子跟读模块数据流: 用户操作→Event→ViewModel→Repository→Room/FileSystem→StateFlow→Compose UI重组",
+      "flow_steps": [
+        {
+          "step": 1,
+          "from": "User",
+          "action": "点击导入视频(B站链接/本地文件)",
+          "to": "ShadowingViewModel.onEvent()",
+          "via": "ShadowingEvent.ImportBilibili(url) / ImportLocalVideo"
+        },
+        {
+          "step": 2,
+          "from": "ShadowingViewModel",
+          "action": "调用ImportVideoUseCase",
+          "to": "VideoImportService",
+          "via": "Hilt注入的UseCase→Service"
+        },
+        {
+          "step": 3,
+          "condition": "B站导入",
+          "from": "VideoImportService.downloadFromBilibili()",
+          "action": "yt-dlp下载视频mp4→写入context.filesDir/shadowing_videos/",
+          "to": "Progress Flow<DownloadProgress>→ViewModel更新UI State",
+          "via": "youtubedl-android→File I/O"
+        },
+        {
+          "step": 4,
+          "condition": "本地导入",
+          "from": "VideoImportService.importLocalVideo()",
+          "action": "SAF Uri→ContentResolver.openInputStream()→复制到私有目录",
+          "to": "写入shadowing_videos/目录",
+          "via": "ContentResolver→File I/O"
+        },
+        {
+          "step": 5,
+          "from": "VideoImportService",
+          "action": "保存视频元数据",
+          "to": "ShadowingVideoDao.insert(ShadowingVideoEntity)",
+          "via": "Room DAO"
+        },
+        {
+          "step": 6,
+          "from": "ShadowingRepository.observeVideos()",
+          "action": "Flow<List<ShadowingVideo>>自动发出更新",
+          "to": "ShadowingViewModel→ShadowingUiState.videoList",
+          "via": "Room Flow→map to Domain Model→StateFlow"
+        },
+        {
+          "step": 7,
+          "condition": "用户选择视频",
+          "from": "ShadowingEvent.SelectVideo(videoId)",
+          "action": "getSentencesForVideo()→加载字幕句子",
+          "to": "ShadowingSentenceDao.observeByVideoId()",
+          "via": "Repository→Room Flow"
+        },
+        {
+          "step": 8,
+          "from": "Media3 ExoPlayer",
+          "action": "播放shadowing_videos/file_path视频+SRT字幕渲染",
+          "to": "VideoPlayerView (Compose AndroidView包装)",
+          "via": "PlayerView+SubtitleView"
+        },
+        {
+          "step": 9,
+          "action": "用户点击录音按钮(Push-to-Talk)",
+          "from": "ShadowingEvent.StartRecording",
+          "to": "MediaRecorder开始录制→临时文件→EncryptedFile写入",
+          "via": "RecordingCryptoManager.encryptWrite()"
+        },
+        {
+          "step": 10,
+          "from": "ShadowingRepository.saveRecording()",
+          "action": "保存录音记录",
+          "to": "ShadowingRecordDao.insert()→Room DB",
+          "via": "Repository→DAO"
+        },
+        {
+          "step": 11,
+          "action": "回放对比",
+          "from": "ShadowingEvent.PlayRecording",
+          "to": "Media3 Player交替播放原音段+用户录音段(EncryptedFile自动解密)",
+          "via": "RecordingCryptoManager.decryptRead()+ExoPlayer.setMediaItem()"
+        }
+      ],
+      "architecture_pattern": "单向数据流: Event→ViewModel (StateFlow)→Compose UI",
+      "data_direction": {
+        "write": "User→UI→ViewModel→Repository→DAO/Service→Room/FileSystem",
+        "read": "Room/FileSystem→DAO→Repository→ViewModel (StateFlow)→Compose UI"
+      }
+    },
+    "M2_pronunciation_flow": {
+      "description": "发音测评模块数据流: 从M1录音选择或独立录音→ASR转录→AI分析→存储结果→UI展示",
+      "flow_steps": [
+        {
+          "step": 1,
+          "action": "用户选择测评来源",
+          "from": "User",
+          "to": "PronunciationViewModel.onEvent()",
+          "via": "PronunciationEvent.SelectRecording(recordId)从M1 shadowing_records表读取, 或StartRecording现场录音"
+        },
+        {
+          "step": 2,
+          "from": "PronunciationViewModel",
+          "action": "触发转录",
+          "to": "PronunciationAssessor.transcribeAudio(audioFilePath)",
+          "via": "useCase→assessor"
+        },
+        {
+          "step": 3,
+          "from": "PronunciationAssessor",
+          "action": "读取加密录音文件",
+          "to": "RecordingCryptoManager.decryptRead()→临时解码缓冲区",
+          "via": "EncryptedFile.openFileDescriptor()"
+        },
+        {
+          "step": 4,
+          "condition": "v1: 在线ASR",
+          "from": "PronunciationAssessor",
+          "action": "发送音频到DeepSeek API(复用AiApiClient)",
+          "to": "TranscriptionResult(转录文本)",
+          "via": "OkHttp POST→解析JSON响应"
+        },
+        {
+          "step": 5,
+          "from": "PronunciationAssessor.assessPronunciation()",
+          "action": "发送目标文本+转录文本到DeepSeek API",
+          "to": "PronunciationAssessment(整体评分+音素级差异+纠正建议)",
+          "via": "DeepSeek API提示词分析"
+        },
+        {
+          "step": 6,
+          "from": "PronunciationViewModel",
+          "action": "存储测评结果",
+          "to": "AssessmentRecordDao.insert()+PhonemeScoreDao.insertBatch()",
+          "via": "Repository→Room DB"
+        },
+        {
+          "step": 7,
+          "from": "Room DB Flow触发",
+          "action": "UI自动更新",
+          "to": "PronunciationUiState.assessment→Compose重组展示评分",
+          "via": "Flow→StateFlow"
+        }
+      ],
+      "architecture_pattern": "单向数据流+异步API调用(suspend function + Result<T>)",
+      "data_direction": {
+        "read": "FileSystem→CryptoManager→Assessor→API→ViewModel→UI",
+        "write": "ViewModel→Repository→DAO→Room"
+      }
+    },
+    "M1_M2_cross_module_flow": {
+      "description": "M2发音测评模块复用M1影子跟读模块的录音数据",
+      "flow": "M2 PronunciationViewModel→ShadowingRepository.getRecordingsForSentence()(M1 API)→M2选取录音→读取audioFilePath→PronunciationAssessor分析→写结果到M2 assessment_records表(通过record_id外键关联M1 shadowing_records)",
+      "shared_components": [
+        "ShadowingRepository (M1—M2只读复用)",
+        "ShadowingRecord (domain model—M2直接使用)",
+        "RecordingCryptoManager (M1—M2复用解密读取)",
+        "AiApiClient (现有—M2复用API调用基础设施)"
+      ],
+      "isolation_boundary": "M2不直接操作M1的DAO, 通过ShadowingRepository接口访问; M2测评结果存储在自己的表中(assessment_records+phoneme_scores), 通过record_id外键实现跨模块关联"
+    }
+  },
+  "layer_responsibilities": {
+    "data_layer": {
+      "responsibilities": [
+        "Room数据库实体定义(@Entity)与DAO(@Dao)",
+        "文件系统I/O(视频存储、录音加密读写)",
+        "网络API调用(yt-dlp下载、DeepSeek API)",
+        "权限检查委托",
+        "数据模型到领域模型的映射(Entity↔Domain Model mappers)"
+      ],
+      "packages": ["com.wordmemo.app.data.shadowing", "com.wordmemo.app.data.pronunciation"]
+    },
+    "domain_layer": {
+      "responsibilities": [
+        "业务用例封装(UseCase)",
+        "纯领域模型定义(无Android依赖)",
+        "Repository接口定义(依赖倒置)",
+        "AI分析服务(PronunciationAssessor)",
+        "业务规则校验"
+      ],
+      "packages": ["com.wordmemo.app.domain.shadowing", "com.wordmemo.app.domain.pronunciation"]
+    },
+    "ui_layer": {
+      "responsibilities": [
+        "Compose屏幕与组件",
+        "ViewModel(持有UiState+处理Event)",
+        "导航路由(Screen sealed class扩展)",
+        "ExoPlayer集成(AndroidView包装)",
+        "媒体资源管理与生命周期",
+        "权限运行时请求处理"
+      ],
+      "packages": ["com.wordmemo.app.ui.screen.shadowing", "com.wordmemo.app.ui.screen.pronunciation"]
+    },
+    "di_layer": {
+      "responsibilities": ["通过Hilt @Module提供DAO、Repository、Service的注入绑定", "管理Media3 ExoPlayer实例生命周期", "提供OkHttpClient复用实例"],
+      "modules": ["ShadowingModule", "PronunciationModule"]
+    }
+  },
+  "file_structure": {
+    "application_private_dir": "context.filesDir/",
+    "subdirectories": {
+      "shadowing_videos": "下载/复制的视频文件(.mp4), 子目录以{videoId}命名",
+      "shadowing_subtitles": "生成/下载的SRT字幕文件, 文件名{videoId}.srt",
+      "recordings": "用户跟读录音.aac文件(EncryptedFile加密), 命名{videoId}_{sentenceIdx}_{timestamp}.aac"
+    },
+    "app_internal_assets": {
+      "phoneme_audio": "assets/audio/phonemes/{ipa_symbol}.mp3 — 44个标准发音音频"
+    }
+  },
+  "navigation_routes": {
+    "new_sealed_classes_in_Screen_kt": [
+      "data object Shadowing : Screen('shadowing')",
+      "data class ShadowingPlayer(val videoId: Long) : Screen('shadowing/player/{videoId}')",
+      "data object Pronunciation : Screen('pronunciation')",
+      "data class PronunciationResult(val assessmentId: Long) : Screen('pronunciation/result/{assessmentId}')",
+      "data object PhonemeReference : Screen('phoneme_reference')"
+    ],
+    "nav_graph_integration": "在现有NavHost composable中添加composable(route=...)块, 与现有路由并列"
+  },
+  "cross_cutting_concerns": {
+    "permission_handling": {
+      "new_permission": "RECORD_AUDIO (dangerous)",
+      "request_strategy": "运行时动态申请, 首次点击录音按钮时触发",
+      "fallback": "拒绝后录音按钮禁用, 显示引导提示",
+      "rationale_dialog": "自定义说明弹窗(What/Why/How透明说明)"
+    },
+    "encryption": {
+      "scope": "所有录音.aac文件使用EncryptedFile (AES256-GCM)",
+      "component": "RecordingCryptoManager @Singleton",
+      "key_protection": "Android Keystore (TEE/StrongBox)"
+    },
+    "offline_strategy": {
+      "M1_video_playback": "完全离线(视频文件本地存储后无需网络)",
+      "M1_download": "需要网络(yt-dlp下载时)",
+      "M2_assessment_v1": "需要网络(DeepSeek API调用)",
+      "M2_phoneme_reference": "完全离线(41个IPA音素音频内置)"
+    },
+    "error_handling": {
+      "pattern": "所有Service方法返回Result<T>, 统一错误sealed class",
+      "error_types": ["VideoDownloadException", "FileCopyException", "AiApiException", "AssessmentFailedException", "UnsupportedFormatException"],
+      "ui_display": "ViewModel通过UiState.error: String?驱动Snackbar/ErrorBanner"
+    },
+    "lifecycle_management": {
+      "exo_player": "跟随Compose生命周期(DisposableEffect+remember)",
+      "media_recorder": "ViewModel的onCleared()中释放",
+      "yt_dlp_download": "通过Flow<DownloadProgress>暴露, ViewModel管理取消"
+    }
+  },
+  "existing_integration_points": {
+    "Screen_kt": "新增Shadowing/Pronunciation等sealed class",
+    "NavGraph_kt": "新增composable路由注册",
+    "WordMemoDatabase_kt": "新增5个Entity注册+Room版本迁移",
+    "DatabaseModule_kt": "新增DAO的Hilt @Provides绑定",
+    "build_gradle_kts_app": "新增media3/youtubedl-android/MPAndroidChart依赖",
+    "AndroidManifest_xml": "新增RECORD_AUDIO权限声明",
+    "AiApiClient": "M2复用现有DeepSeek API调用基础设施(OkHttpClient+API Key配置)"
+  },
+  "version_migration": {
+    "app_version": "v7→v8 (versionCode=77000→80000)",
+    "db_migration": "新增5张表(递增迁移版本号)",
+    "backward_compatibility": "完全向后兼容, 现有数据不受影响"
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "version": "v1",
+  "tech_selection": {
+    "video_playback": "Media3 (ExoPlayer) — 理由：Google官方推荐，支持字幕渲染、变速播放、生命周期管理",
+    "video_download": "youtubedl-android — 理由：yt-dlp Android wrapper，支持B站视频解析下载",
+    "audio_encryption": "security-crypto EncryptedFile (AES256-GCM) — 理由：项目已有声明，Android Keystore保护密钥",
+    "voice_recording": "android.media.MediaRecorder (AAC) — 理由：系统API零额外依赖，16000Hz采样率匹配ASR输入要求",
+    "ai_transcription_assessment": "DeepSeek API — 理由：复用现有AiApiClient基础设施和API Key, v1文本级差异分析",
+    "phoneme_reference_audio": "assets内置44个IPA音素MP3 — 理由：完全离线，无网络依赖",
+    "progress_charts": "Compose Canvas自绘 — 理由：避免引入MPAndroidChart依赖，更灵活适配Compose主题",
+    "dependency_injection": "Hilt — 理由：项目已全面使用Hilt，新增ShadowingModule和PronunciationModule即可",
+    "database": "Room — 理由：项目已有且深度使用，新增5张表无需引入新ORM"
+  },
+  "implementation_path": [
+    {
+      "phase": 1,
+      "name": "数据层 (Room表+DAO+Repository)",
+      "description": "定义5张新增Room表的@Entity/@Dao、Room Database版本迁移、Entity↔Domain Model映射",
+      "deliverables": [
+        "ShadowingVideoEntity.kt + ShadowingVideoDao.kt",
+        "ShadowingSentenceEntity.kt + ShadowingSentenceDao.kt",
+        "ShadowingRecordEntity.kt + ShadowingRecordDao.kt",
+        "AssessmentRecordEntity.kt + AssessmentRecordDao.kt",
+        "PhonemeScoreEntity.kt + PhonemeScoreDao.kt",
+        "WordMemoDatabase.kt (新增5个Entity注册 + Migration)",
+        "DatabaseModule.kt (新增DAO的Hilt绑定)",
+        "ShadowingModule.kt + PronunciationModule.kt (Hilt DI Module)",
+        "VideoImportService.kt (youtubedl-android下载 + SAF本地导入)",
+        "RecordingCryptoManager.kt (加密读写封装)"
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "领域层 (UseCase/Model)",
+      "description": "定义Repository接口和实现、PronunciationAssessor服务、各UseCase业务封装",
+      "deliverables": [
+        "ShadowingRepository (interface + RoomRepository impl)",
+        "PronunciationRepository (interface + RoomRepository impl)",
+        "ImportVideoUseCase.kt",
+        "DeleteVideoUseCase.kt",
+        "SaveRecordingUseCase.kt",
+        "GetRecordingsUseCase.kt",
+        "AssessPronunciationUseCase.kt",
+        "TranscribeAudioUseCase.kt",
+        "GenerateCorrectionUseCase.kt",
+        "GetAssessmentHistoryUseCase.kt",
+        "PronunciationAssessor.kt (DeepSeek API调用封装)",
+        "Domain Models: ShadowingVideo, ShadowingSentence, ShadowingRecord, PronunciationAssessment, PhonemeScore, WordTiming"
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "ViewModel层",
+      "description": "实现ShadowingViewModel和PronunciationViewModel，定义sealed UiState和Event",
+      "deliverables": [
+        "ShadowingViewModel.kt (@HiltViewModel)",
+        "ShadowingUiState.kt",
+        "ShadowingEvent.kt (sealed interface)",
+        "PronunciationViewModel.kt (@HiltViewModel)",
+        "PronunciationUiState.kt",
+        "PronunciationEvent.kt (sealed interface)"
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "UI层 (Compose Screen)",
+      "description": "实现所有Compose屏幕和可复用组件，集成Media3 ExoPlayer，录音控制，评分可视化",
+      "deliverables": [
+        "ShadowingListScreen.kt (视频列表页)",
+        "ShadowingPlayerScreen.kt (播放+字幕页)",
+        "ShadowingPracticeScreen.kt (跟读录音页)",
+        "VideoPlayerView.kt (AndroidView包装ExoPlayer)",
+        "SubtitleOverlay.kt (字幕叠加层)",
+        "RecordingControlBar.kt (录音控制栏)",
+        "SentenceTimeline.kt (句子时间轴)",
+        "PronunciationHomeScreen.kt (测评入口)",
+        "PronunciationResultScreen.kt (评分展示)",
+        "PhonemeHighlightText.kt (音素高亮)",
+        "CorrectionSuggestionCard.kt",
+        "ScoreGauge.kt (Compose Canvas自绘)",
+        "TrendChart.kt (Compose Canvas自绘)",
+        "PhonemeReferenceBrowser.kt",
+        "Screen.kt (新增路由sealed class)",
+        "NavGraph.kt (新增composable路由注册)"
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "集成与测试",
+      "description": "Hilt Module注册、build.gradle依赖、Manifest权限声明、Room Migration测试、端到端集成测试",
+      "deliverables": [
+        "build.gradle.kts (新增media3-exoplayer/media3-ui/youtubedl-android/ffmpeg-android依赖)",
+        "AndroidManifest.xml (新增RECORD_AUDIO权限声明)",
+        "Room Migration单元测试 (MigrationTest.kt)",
+        "E2E集成测试 (导入→播放→录音→测评→展示)"
+      ]
+    }
+  ],
+  "key_algorithms": [
+    "句子分割策略：解析SRT/VTT字幕→按标点符号分句→合并过短片段(<1s)→分割过长片段(>15s)→输出句级ShadowingSentence列表，分割边界优先对齐字幕时间轴",
+    "发音评分算法v1：Audio→DeepSeek ASR转录文本→目标文本+转录文本→DeepSeek API文本级差异分析→整体评分(0-100)+逐词差异+音素级纠正建议，从准确度/流利度/完整度三维评价"
+  ],
+  "interface_schema": {
+    "ShadowingVideoDao": "@Dao interface ShadowingVideoDao { observeAll(): Flow<List<ShadowingVideoEntity>>; getById(id: Long): ShadowingVideoEntity?; insert(video: ShadowingVideoEntity): Long; update(video: ShadowingVideoEntity): Unit; deleteById(id: Long): Unit }",
+    "ShadowingSentenceDao": "@Dao interface ShadowingSentenceDao { observeByVideoId(videoId: Long): Flow<List<ShadowingSentenceEntity>>; insertBatch(sentences: List<ShadowingSentenceEntity>): List<Long>; update(sentence: ShadowingSentenceEntity): Unit; deleteByVideoId(videoId: Long): Unit }",
+    "ShadowingRecordDao": "@Dao interface ShadowingRecordDao { observeBySentenceId(sentenceId: Long): Flow<List<ShadowingRecordEntity>>; getBySentenceId(sentenceId: Long): List<ShadowingRecordEntity>; insert(record: ShadowingRecordEntity): Long; deleteById(id: Long): Unit }",
+    "AssessmentRecordDao": "@Dao interface AssessmentRecordDao { observeByRecordId(recordId: Long): Flow<AssessmentRecordEntity?>; observeBySentenceId(sentenceId: Long): Flow<List<AssessmentRecordEntity>>; insert(assessment: AssessmentRecordEntity): Long; getPhonemeScores(assessmentId: Long): List<PhonemeScoreEntity> }",
+    "PhonemeScoreDao": "@Dao interface PhonemeScoreDao { insertBatch(scores: List<PhonemeScoreEntity>): List<Long>; getByAssessmentId(assessmentId: Long): List<PhonemeScoreEntity> }",
+    "ShadowingRepository": "interface ShadowingRepository { observeVideos(): Flow<List<ShadowingVideo>>; getVideoById(videoId: Long): ShadowingVideo?; deleteVideo(videoId: Long); getSentencesForVideo(videoId: Long): Flow<List<ShadowingSentence>>; saveRecording(videoId, sentenceId, audioFilePath, durationMs): Long; getRecordingsForSentence(sentenceId: Long): List<ShadowingRecord>; deleteRecording(recordId: Long) }",
+    "VideoImportService": "class VideoImportService @Inject constructor(context: Context, shadowingVideoDao: ShadowingVideoDao) { downloadFromBilibili(url: String): Result<ShadowingVideoEntity>; importLocalVideo(uri: Uri): Result<ShadowingVideoEntity>; cancelDownload(videoId: Long) }",
+    "PronunciationAssessor": "class PronunciationAssessor @Inject constructor(aiApiClient: AiApiClient, appConfigDao: AppConfigDao) { suspend fun assessPronunciation(sentenceText: String?, targetText: String, recordedText: String, wordTimings: List<WordTiming>? = null): PronunciationAssessment; suspend fun transcribeAudio(audioFilePath: String, language: String = \"en\"): TranscriptionResult }",
+    "ShadowingViewModel": "@HiltViewModel class ShadowingViewModel @Inject constructor(shadowingRepository: ShadowingRepository, videoImportService: VideoImportService) — UiState: ShadowingUiState (StateFlow), Event: ShadowingEvent (sealed interface)",
+    "PronunciationViewModel": "@HiltViewModel class PronunciationViewModel @Inject constructor(pronunciationAssessor: PronunciationAssessor, shadowingRepository: ShadowingRepository) — UiState: PronunciationUiState (StateFlow), Event: PronunciationEvent (sealed interface)"
+  },
+  "test_strategy": {
+    "M1_数据层": "Room in-memory database测试每个DAO的CRUD+Flow观察；Migration测试验证旧→新版本数据完整性；VideoImportService使用MockWebServer模拟B站下载响应",
+    "M1_领域层": "纯JVM单元测试（MockK），覆盖ImportVideoUseCase分支（成功/网络错误/格式不支持）；SaveRecordingUseCase的加密写入路径",
+    "M1_ViewModel": "TestCoroutineDispatcher + Mock Repository，验证每个ShadowingEvent处理后的UiState变更（视频列表加载、录音状态机、下载进度更新）",
+    "M1_UI层": "Compose UI Test (createComposeRule)，验证视频列表渲染、播放器状态、字幕高亮、录音按钮交互、句子时间轴点击跳转",
+    "M2_数据层": "Room in-memory测试AssessmentRecordDao + PhonemeScoreDao的CRUD和外键级联操作；批量insert与按assessmentId查询",
+    "M2_领域层": "Mock AiApiClient + MockWebServer录制DeepSeek API响应，验证transcribeAudio和assessPronunciation的提示词构造与响应解析；覆盖API超时/失败错误处理",
+    "M2_ViewModel": "Mock Repository + Turbine测试StateFlow，验证AssessPronunciation触发assessor调用、录音状态机转换、历史记录加载",
+    "M2_UI层": "Compose UI Test，验证评分展示、音素颜色映射(红/黄/绿)、纠正建议卡片展开收起、空状态显示",
+    "跨模块集成": "Robolectric + Room in-memory + mock ExoPlayer + mock AiApiClient，覆盖完整E2E流程：导入→播放→录音→测评→评分展示"
+  },
+  "module_risk_matrix": {
+    "M1_F1_B站导入": {"risk": "高", "reason": "依赖youtubedl-android，B站反爬规则可能变更；国产ROM兼容性未经验证", "mitigation": "提供本地文件导入兜底路径；下载失败提示切换到SAF文件选择器"},
+    "M1_F2_本地导入": {"risk": "低", "reason": "SAF URI→ContentResolver复制，Android标准API稳定可靠", "mitigation": "大文件(>=500MB)使用协程async避免ANR"},
+    "M1_F3_视频播放": {"risk": "中", "reason": "Media3成熟稳定但字幕同步精度需要调优；不同视频解码格式需测试", "mitigation": "使用Media3内置SubtitleView；覆盖主流视频格式测试"},
+    "M1_F4_句子分割": {"risk": "中", "reason": "v1依赖ASR/字幕质量，边界情况（无字幕/双语/乱码）多", "mitigation": "提供手动输入文本后备方案；实现后处理分割兜底"},
+    "M1_F5_录音回放": {"risk": "中", "reason": "RECORD_AUDIO运行时权限；MediaRecorder国产ROM兼容性；加密回放延迟", "mitigation": "权限申请遵循最佳实践；加密回放增加缓冲预加载"},
+    "M1_F6_进度管理": {"risk": "低", "reason": "纯Room CRUD操作，无外部依赖", "mitigation": "Room单元测试覆盖所有进度CRUD"},
+    "M2_F1_整体评分": {"risk": "中", "reason": "v1纯文本级分析不如声学特征精准，对发音错误可能漏报/误报；API调用需要网络", "mitigation": "提示词提供明确评分标准和示例；v2计划接入whisper.cpp音素级评分；离线时禁用并提示"},
+    "M2_F2_音素评分": {"risk": "高", "reason": "v1无音素对齐模型，只能通过LLM文本分析近似推断音素差异；数据量随测评增长", "mitigation": "v1明确定位为近似评分并UI标注；v2升级到whisper.cpp+GOP评分；定期归档历史"},
+    "M2_F3_ASR转录": {"risk": "中", "reason": "非英语母语用户口音导致ASR转写质量下降", "mitigation": "提供用户手动修正转录文本功能；assessPronunciation传入原文做参考修正"},
+    "Cross_M1_M2": {"risk": "中", "reason": "M2依赖M1 ShadowingRepository接口，并行开发时接口变更可能导致编译错误", "mitigation": "早定义Repository interface并锁定contract；通过外键record_id实现跨模块关联"}
+  }
+}

@@ -80,12 +80,19 @@ class WordDetailViewModel(application: Application) : AndroidViewModel(applicati
             val result = aiRepository.translate(word.english)
             if (result.translation.isNotBlank() && result.translation != "翻译不可用" && result.translation != "解析失败") {
                 val phonetic = if (result.phonetic.isNotBlank()) "[${result.phonetic}] " else ""
-                // 只在单词无已有备注时写入翻译用法说明
-                val newNote = if (word.note.isNullOrBlank() && !result.usage.isNullOrBlank()) {
-                    "📖 ${result.usage}"
-                } else {
-                    word.note // 保留用户已有备注
+                // 构建备注：原文 + 高频短语/例句
+                val noteSb = StringBuilder()
+                if (!word.note.isNullOrBlank()) noteSb.append(word.note)
+                if (result.usage != null || result.examples.isNotEmpty()) {
+                    if (noteSb.isNotEmpty()) noteSb.append("\n---\n")
+                    result.usage?.let { noteSb.append("📖 高频短语: $it\n") }
+                    val ex = result.examples.take(3)
+                    if (ex.isNotEmpty()) {
+                        noteSb.append("📝 例句:\n")
+                        ex.forEach { e -> noteSb.append("  • $e\n") }
+                    }
                 }
+                val newNote = noteSb.toString().trimEnd()
                 val updatedWord = Word(
                     id = word.id, english = word.english,
                     chinese = "$phonetic${result.translation}",

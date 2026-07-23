@@ -23,6 +23,16 @@ import com.wordmemo.app.data.local.entity.TagEntity
 import com.wordmemo.app.data.local.entity.WordEntity
 import com.wordmemo.app.data.local.entity.WordGroupCrossRef
 import com.wordmemo.app.data.local.entity.WordTagCrossRef
+import com.wordmemo.app.data.shadowing.entity.ShadowingVideoEntity
+import com.wordmemo.app.data.shadowing.entity.ShadowingSentenceEntity
+import com.wordmemo.app.data.shadowing.entity.ShadowingRecordEntity
+import com.wordmemo.app.data.pronunciation.entity.AssessmentRecordEntity
+import com.wordmemo.app.data.pronunciation.entity.PhonemeScoreEntity
+import com.wordmemo.app.data.shadowing.dao.ShadowingVideoDao
+import com.wordmemo.app.data.shadowing.dao.ShadowingSentenceDao
+import com.wordmemo.app.data.shadowing.dao.ShadowingRecordDao
+import com.wordmemo.app.data.pronunciation.dao.AssessmentRecordDao
+import com.wordmemo.app.data.pronunciation.dao.PhonemeScoreDao
 
 @Database(
     entities = [
@@ -36,9 +46,14 @@ import com.wordmemo.app.data.local.entity.WordTagCrossRef
         FsrsParamsEntity::class,
         AiMnemonicEntity::class,
         AiRelationEntity::class,
-        AppConfigEntity::class
+        AppConfigEntity::class,
+        ShadowingVideoEntity::class,
+        ShadowingSentenceEntity::class,
+        ShadowingRecordEntity::class,
+        AssessmentRecordEntity::class,
+        PhonemeScoreEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class WordMemoDatabase : RoomDatabase() {
@@ -50,6 +65,11 @@ abstract class WordMemoDatabase : RoomDatabase() {
     abstract fun fsrsParamsDao(): FsrsParamsDao
     abstract fun aiContentDao(): AiContentDao
     abstract fun appConfigDao(): AppConfigDao
+    abstract fun shadowingVideoDao(): ShadowingVideoDao
+    abstract fun shadowingSentenceDao(): ShadowingSentenceDao
+    abstract fun shadowingRecordDao(): ShadowingRecordDao
+    abstract fun assessmentRecordDao(): AssessmentRecordDao
+    abstract fun phonemeScoreDao(): PhonemeScoreDao
 
     companion object {
         @Volatile private var instance: WordMemoDatabase? = null

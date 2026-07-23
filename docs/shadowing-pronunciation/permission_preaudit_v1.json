@@ -1,0 +1,311 @@
+{
+  "meta": {
+    "document_name": "词鼠书记 权限安全预审报告",
+    "document_id": "PERMISSION_PREAUDIT_v1",
+    "version": "v1",
+    "app_name": "词鼠书记 (WordMemo)",
+    "app_version": "v7 → v8 (versionCode=80000)",
+    "bound_req_spec": "REQ_SPEC_v1",
+    "bound_modules": ["M1 影子跟读学习模块", "M2 发音测评与纠正模块"],
+    "date": "2026-07-22",
+    "author": "Hermes Agent / subagent",
+    "review_status": "draft",
+    "design_principles": [
+      "无注册、纯离线、数据全本地",
+      "权限最小化 — 仅声明功能必然需要的权限",
+      "SAF替代存储权限 — 避免READ_MEDIA_VIDEO等存储读取权限",
+      "运行时动态申请 — dangerous级权限仅在用户触发对应功能时弹出",
+      "拒绝友好降级 — 用户拒绝权限时提示功能受限但不崩溃"
+    ]
+  },
+
+  "existing_permissions": {
+    "summary": "当前 Manifest 已声明 3 个权限，均为 normal 级（安装时自动授予），无 dangerous 级权限",
+    "list": [
+      {
+        "name": "android.permission.INTERNET",
+        "protection_level": "normal",
+        "declared_in": "AndroidManifest.xml 第8行",
+        "purpose": "用户自配 API Key 的 AI 功能 HTTP 调用（DeepSeek API）",
+        "reuse_in_new_modules": "✅ M1 B站视频下载 (yt-dlp) + M2 AI 发音分析共用此权限",
+        "notes": "不主动后台联网、不收集数据、不内置第三方端点"
+      },
+      {
+        "name": "android.permission.ACCESS_NETWORK_STATE",
+        "protection_level": "normal",
+        "declared_in": "AndroidManifest.xml 第9行",
+        "purpose": "检查网络可用性，在无网络时提示用户",
+        "reuse_in_new_modules": "✅ M1 yt-dlp 下载前先检查网络状态",
+        "notes": "非功能必须，仅用于提升用户体验（友好提示）"
+      },
+      {
+        "name": "android.permission.REQUEST_INSTALL_PACKAGES",
+        "protection_level": "normal",
+        "declared_in": "AndroidManifest.xml 第10行",
+        "purpose": "APK 自动更新时安装新版本",
+        "reuse_in_new_modules": "❌ 与新模块无关（已有权限，无需变更）",
+        "notes": "权限说明中标注「仅用于自更新，不用于其他安装行为」"
+      }
+    ]
+  },
+
+  "new_permissions_required": {
+    "summary": "M1 + M2 新增所需权限：1个 dangerous 级（RECORD_AUDIO），0个 normal 级",
+    "list": [
+      {
+        "name": "android.permission.RECORD_AUDIO",
+        "protection_level": "dangerous",
+        "module": "M1 + M2",
+        "modules_using": ["M1-F5 跟读录音与回放对比", "M2-F1 录音测评 — 整体发音评分", "M2-F2 音素级GOP评分输入"],
+        "purpose": "用户跟读时录制语音、发音测评时录制音频作为AI分析输入",
+        "technical_implementation": "MediaRecorder (AAC/Opus 压缩格式)，Push-to-Talk 模式，单次最长15秒",
+        "storage": "应用私有目录 (context.filesDir/recordings/)，文件命名规则 {videoId}_{sentenceIdx}_{timestamp}.aac",
+        "necessity_argument": [
+          "RECORD_AUDIO 是影子跟读和发音测评的核心功能基础 — 无录音则无跟读，无音频则无测评",
+          "录音仅在用户主动按下录音按钮时激活，持续录音时间有限（≤15秒/次）",
+          "录音文件仅存于应用私有目录，不共享、不上传至任何第三方服务器",
+          "已考虑复用：M1 和 M2 共用同一权限实例，在 Manifest 中声明一次即可"
+        ],
+        "user_denial_fallback": "拒绝授权后：录音按钮显示「需麦克风权限」提示，用户可点击「去设置」跳转系统设置页手动授权；跟读功能不可用，发音测评仅支持已有跟读录音的分析（无法现场录音）",
+        "request_timing": "用户首次点击录音按钮时弹出系统权限对话框（运行时动态申请，非启动时申请）",
+        "rationale_dialog": "在权限请求前展示自定义说明弹窗：「词鼠书记需要使用麦克风录制您的跟读声音，用于跟读回放对比和发音测评分析。录音仅保存在本地，不会上传到任何服务器。」",
+        "android_version_compat": {
+          "minSdk=26": "Android 8.0+ 运行时权限模型已成熟，正常弹窗",
+          "targetSdk=34": "Android 14 录音权限无额外变化，无需特殊处理"
+        }
+      }
+    ]
+  },
+
+  "permissions_not_required": {
+    "summary": "以下常见相关权限在M1/M2中明确不需要，附裁剪依据",
+    "items": [
+      {
+        "permission": "android.permission.READ_MEDIA_VIDEO (Android 13+)",
+        "reason": "使用 SAF (Storage Access Framework) 的 ACTION_OPEN_DOCUMENT 导入本地视频文件。SAF 通过系统文件选择器让用户自主选择文件，系统授予临时 URI 读写权限，应用无需声明任何存储读取权限",
+        "evidence": "M1-F2 验收标准 AC2-1 明确要求「调用 SAF 打开系统文件选择器」"
+      },
+      {
+        "permission": "android.permission.READ_EXTERNAL_STORAGE (Android 12-)",
+        "reason": "同上，SAF 完全替代了传统存储读取权限。minSdk=26 已覆盖 Android 8.0+ 的运行时权限模型；targetSdk=34 更推荐 PhotoPicker 或 SAF",
+        "evidence": "需求规格「核心约束」明确要求：SAF替代存储权限"
+      },
+      {
+        "permission": "android.permission.WRITE_EXTERNAL_STORAGE",
+        "reason": "所有视频、录音、字幕文件均写入应用私有目录 (context.filesDir/)，无需外部存储写入权限。Android 10+ (minSdk=26) 的 Scoped Storage 也推荐此做法",
+        "evidence": "应用私有目录写入不需要任何权限声明"
+      },
+      {
+        "permission": "android.permission.MANAGE_EXTERNAL_STORAGE",
+        "reason": "管理所有文件权限过于宽泛，不符合最小化原则。无任何功能需要全文件访问",
+        "evidence": "所有文件操作均限定在应用私有目录或 SAF 临时 URI"
+      },
+      {
+        "permission": "android.permission.CAMERA",
+        "reason": "影子跟读和发音测评均不涉及视频录制或拍照",
+        "evidence": "功能清单无任何摄像头使用场景"
+      },
+      {
+        "permission": "android.permission.POST_NOTIFICATIONS",
+        "reason": "虽然 yt-dlp 下载进度可能需要通知，但该模块使用前台进度条 UI 即可，无需系统通知权限。若后续需要后台下载通知可重新评估",
+        "evidence": "M1-F1 AC1-7: 「同时下载多个视频时排队处理，不抢占前台」"
+      },
+      {
+        "permission": "android.permission.FOREGROUND_SERVICE",
+        "reason": "下载和处理流程在用户可见的前台 Activity 中进行，无需 Foreground Service。若后续需要在后台继续下载可重新评估",
+        "evidence": "下载流程在当前界面显示进度，用户可等待完成"
+      },
+      {
+        "permission": "android.permission.RECORD_AUDIO 之外的其他 MIC 相关权限 (如 CAPTURE_AUDIO_OUTPUT)",
+        "reason": "CAPTURE_AUDIO_OUTPUT 为 system-level 权限，普通应用无法获取，且不需要（只录麦克风输入，不录系统音频输出）",
+        "evidence": "Push-to-Talk 模式仅采集麦克风输入"
+      },
+      {
+        "permission": "android.permission.BLUETOOTH / BLUETOOTH_CONNECT",
+        "reason": "不涉及蓝牙设备连接（蓝牙耳机通过系统音频路由处理，无需应用声明）",
+        "evidence": "无蓝牙相关功能点"
+      },
+      {
+        "permission": "android.permission.ACCESS_FINE_LOCATION / ACCESS_COARSE_LOCATION",
+        "reason": "无任何位置相关功能",
+        "evidence": "纯离线学习工具，不获取位置"
+      },
+      {
+        "permission": "android.permission.READ_CONTACTS / READ_CALL_LOG / READ_PHONE_STATE",
+        "reason": "不与通讯录、通话记录交互",
+        "evidence": "无注册、无社交功能"
+      }
+    ]
+  },
+
+  "encryption_strategy": {
+    "summary": "录音文件包含用户个人语音生物特征，属于敏感数据。项目已引入 security-crypto 库，建议利用其对录音文件进行加密存储",
+    "current_encryption_capability": "build.gradle.kts 第109行已声明 androidx.security:security-crypto:1.1.0-alpha06，EncryptedFile API 可直接用于文件加密",
+    "recommendations": {
+      "recording_files": {
+        "what": "M1-F5 跟读录音 + M2-F1/M2-F2 测评录音的 AAC/Opus 文件",
+        "sensitivity": "高 — 语音生物特征可识别个人身份",
+        "strategy": "使用 EncryptedFile (AES256-GCM) 写入录音文件，读取时自动解密。录音在 MediaRecorder 停止后立即从临时缓冲区写入 EncryptedFile",
+        "code_impact": "新增 RecordingCryptoManager (Hilt @Singleton)，封装 EncryptedFile 的创建、读写、删除操作",
+        "performance": "AAC 文件通常 50-200KB（15秒），AES256-GCM 加解密延迟 < 10ms，无感知",
+        "alternative": "若性能敏感，可仅加密文件路径+文件名元数据，不加密音频内容（降低安全等级但提升读取兼容性）",
+        "decision": "推荐全量加密录音文件，不影响播放性能",
+        "notes": "用户删除录音时，对应的加密文件也应一并删除；删除操作使用 EncryptedFile.delete() 确保安全擦除"
+      },
+      "transcript_and_scores": {
+        "what": "Whisper 转录文本、GOP 评分明细、纠正建议内容",
+        "sensitivity": "中 — 文本数据可推断学习内容和发音缺陷",
+        "strategy": "数据存储于 Room 数据库中，建议对敏感列（如 transcript_text、correction_suggestion）使用 EncryptedString Converter 或应用层 AES 加密",
+        "code_impact": "Room @TypeConverter 实现 String↔EncryptedString 双向转换",
+        "decision": "可选优化，v1 可先不做列级加密，依赖 Room 数据库文件自身的 Android 应用沙箱保护"
+      },
+      "key_management": {
+        "strategy": "EncryptedFile 使用 Android Keystore 生成的 master key，密钥由系统级 TEE/StrongBox 保护，应用无法导出",
+        "implementation": "MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC) 创建主密钥，EncryptedFile.Builder 构建加密文件",
+        "backup_concern": "android:allowBackup=true（Manifest 第14行），加密文件备份到云后需确保 master key 不随备份迁移。建议在 Android 12+ 使用 android:allowBackup 的 clientSideEncryption 标记，或对加密文件不做云备份"
+      }
+    },
+    "data_at_rest": "录音文件以 EncryptedFile 加密存储于应用私有目录；Room 数据库文件受 Android 应用沙箱保护（其他应用不可读）",
+    "data_in_transit": "录音文件不上传至任何服务器（AI 分析仅使用转录文本 API），无需传输加密",
+    "data_deletion": "用户删除视频时，关联的录音加密文件 + Room 数据库记录一并清理；删除操作使用 EncryptedFile.delete() 确保安全擦除"
+  },
+
+  "runtime_permission_flow": {
+    "summary": "唯一新增 dangerous 权限 RECORD_AUDIO 的运行时申请流程设计",
+    "steps": [
+      {
+        "step": 1,
+        "trigger": "用户点击录音按钮（按住录音/松开停止 UI）",
+        "component": "ShadowingRecordViewModel / AssessmentRecordViewModel"
+      },
+      {
+        "step": 2,
+        "check": "ContextCompat.checkSelfPermission(RECORD_AUDIO) 返回是否已授权",
+        "authorized_path": "进入录音流程，初始化 MediaRecorder"
+      },
+      {
+        "step": 3,
+        "denied_path": "判断 shouldShowRequestPermissionRationale()",
+        "rationale_needed": "显示自定义说明 Dialog，包含使用目的和隐私承诺，Dialog 关闭后请求权限",
+        "rationale_not_needed": "直接调用 requestPermissions(RECORD_AUDIO, REQUEST_CODE)"
+      },
+      {
+        "step": 4,
+        "granted": "回调 onRequestPermissionsResult → GRANTED → 初始化 MediaRecorder → 开始录音",
+        "denied_never_ask": "展示「权限已永久拒绝」提示，引导用户前往系统设置手动开启，并提供「去设置」快捷按钮（Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)）"
+      }
+    ]
+  },
+
+  "manifest_changes_required": {
+    "summary": "仅需在 AndroidManifest.xml 中新增一行 RECORD_AUDIO 权限声明",
+    "additions": [
+      {
+        "type": "uses-permission",
+        "name": "android.permission.RECORD_AUDIO",
+        "placement": "建议放在 INTERNET 权限声明之后，添加与现有权限注释风格一致的中文注释",
+        "code": "    <!-- RECORD_AUDIO: dangerous级，运行时动态申请。\n         仅用于影子跟读录音和发音测评录音。\n         录音仅存本地，不上传任何服务器。\n         采用 Push-to-Talk 模式，单次最长15秒。 -->\n    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />",
+        "maxSdkVersion": "可选设置为 29（Android 10+ 录音权限无重大变化，可不设）"
+      }
+    ],
+    "no_removals": "无需删除任何现有权限声明",
+    "no_changes_to_existing": "现有 INTERNET / ACCESS_NETWORK_STATE / REQUEST_INSTALL_PACKAGES 保持不变"
+  },
+
+  "third_party_sdk_permissions": {
+    "summary": "新引入依赖不会引入意外权限。yt-dlp-android 和 Media3 均不自动添加应用级权限",
+    "items": [
+      {
+        "library": "yt-dlp-android (youtubedl-android)",
+        "version": "由 development/version catalog 管理",
+        "permission_risk": "低 — 纯下载库，不声明任何 Android 权限",
+        "mitigation": "下载文件写入应用私有目录，不涉及外部存储"
+      },
+      {
+        "library": "Media3 (ExoPlayer)",
+        "version": "androidx.media3:media3-exoplayer:1.2.0+",
+        "permission_risk": "低 — Media3 不自动声明录音或存储权限。仅使用视频解码和渲染功能",
+        "mitigation": "仅用于播放本地视频文件和标准发音音频，无额外权限需求"
+      },
+      {
+        "library": "FFmpeg Android (音视频处理)",
+        "version": "com.github.yausername:ffmpeg-android",
+        "permission_risk": "低 — 纯命令行工具，不声明 Android 权限",
+        "mitigation": "操作已在应用私有目录的文件，不涉及跨应用文件"
+      },
+      {
+        "library": "MPAndroidChart (可选图表库)",
+        "version": "com.github.PhilJay:MPAndroidChart:v3.1.0",
+        "permission_risk": "无 — 纯 UI 渲染库，不涉及任何权限",
+        "mitigation": "仅用于绘制评分趋势图，无任何系统交互"
+      }
+    ]
+  },
+
+  "risk_assessment_matrix": {
+    "overall_risk": "低",
+    "rationale": "M1+M2 仅新增 1 个 dangerous 级权限（RECORD_AUDIO），且使用场景清晰、触发时机精准、数据全本地。无新增 normal 级权限。录音文件通过 EncryptedFile 加密存储。不存在过于宽泛或冗余的权限声明。",
+    "dimensions": [
+      {
+        "dimension": "权限数量变化",
+        "rating": "✅ 绿色",
+        "detail": "3→4，仅 +1 个 dangerous 权限。无新增 normal 级权限"
+      },
+      {
+        "dimension": "权限危险等级",
+        "rating": "🟡 黄色",
+        "detail": "RECORD_AUDIO 属于 dangerous 级，但 Android 用户对此权限的隐私敏感度低于位置/通讯录。通过 Push-to-Talk 模式（按住录音/松开停止）降低持续录音风险"
+      },
+      {
+        "dimension": "权限用途透明度",
+        "rating": "✅ 绿色",
+        "detail": "每个权限的用途在 Manifest 注释中明确标注；Rationale Dialog 在首次请求前展示；用户随时可在系统设置中撤回权限"
+      },
+      {
+        "dimension": "数据保护",
+        "rating": "✅ 绿色",
+        "detail": "录音文件 EncryptedFile (AES256-GCM) 加密；转录文本存本地 Room；不上传任何音频文件至任何服务器"
+      },
+      {
+        "dimension": "第三方依赖风险",
+        "rating": "✅ 绿色",
+        "detail": "Media3 / yt-dlp-android / FFmpeg 均为成熟开源库，不声明额外权限"
+      },
+      {
+        "dimension": "合规对齐",
+        "rating": "✅ 绿色",
+        "detail": "遵循权限最小化原则、运行时动态申请、拒绝友好降级。符合 Android 隐私最佳实践"
+      }
+    ]
+  },
+
+  "review_notes": [
+    "1. RECORD_AUDIO 仅声明一次 Manifest 条目，M1 和 M2 共用同一运行时授权",
+    "2. 建议在 ShadowingRecordService 或录音 ViewModel 中统一处理权限逻辑，避免重复",
+    "3. EncryptedFile 加密录音文件会小幅增加冷启动延迟（首次创建 MasterKey 时约 100ms），应在 Application.onCreate 中预初始化",
+    "4. 若后续 v2 引入 whisper.cpp 离线模型（约 80MB APK 增长），不涉及新增权限，无需重新预审",
+    "5. Android 14 (API 34) 的录音权限行为无变化，targetSdk=34 兼容",
+    "6. Android 15 (API 35) 新增录音期间的屏幕显示指示器（绿色指示灯），此为系统行为，应用无需适配",
+    "7. 本预审基于 REQ_SPEC_v1 版本。若需求变更（如新增视频录制、蓝牙麦克风等），需重新走预审流程"
+  ],
+
+  "attachments": {
+    "referenced_documents": [
+      {
+        "id": "REQ_SPEC_v1",
+        "title": "词鼠书记 需求规格说明书 v1",
+        "path": "docs/req_spec_v1.md"
+      },
+      {
+        "id": "AndroidManifest.xml",
+        "title": "当前应用 Manifest",
+        "path": "app/src/main/AndroidManifest.xml"
+      },
+      {
+        "id": "build.gradle.kts",
+        "title": "应用构建配置（含 security-crypto 依赖）",
+        "path": "app/build.gradle.kts"
+      }
+    ]
+  }
+}

@@ -1,0 +1,620 @@
+{
+  "meta": {
+    "document_name": "词鼠书记 需求规格说明书",
+    "document_id": "REQ_SPEC_v1",
+    "version": "v1",
+    "app_name": "词鼠书记 (WordMemo)",
+    "current_version": "v7 (versionCode=77000)",
+    "date": "2026-07-22",
+    "author": "Hermes Agent / subagent",
+    "purpose": "为词鼠书记 Android App 新增【影子跟读学习模块】和【发音测评与纠正模块】的需求规格说明",
+    "status": "draft",
+    "approval": "pending"
+  },
+  "project_context": {
+    "tech_stack": {
+      "ui_framework": "Jetpack Compose + Material3",
+      "language": "Kotlin 1.9.22",
+      "build_system": "Gradle 8.9 + AGP 8.5.2",
+      "jdk": "JDK 17",
+      "di": "Hilt 2.50 (KSP)",
+      "database": "Room 2.6.1 (KSP)",
+      "network": "OkHttp 4.12.0",
+      "encryption": "security-crypto 1.1.0-alpha06",
+      "ocr": "Tesseract (tess-two 9.1.0)",
+      "min_sdk": 26,
+      "target_sdk": 34,
+      "compile_sdk": 34
+    },
+    "design_principles": [
+      "无注册、纯离线、数据全本地",
+      "权限最小化 — 仅声明功能必然需要的权限",
+      "国产手机兼容 — 不依赖 Google Play Services",
+      "已验证的 API Key 自动化管理避免截断/覆盖",
+      "版本号格式 v7 → v5 迁移已就绪"
+    ],
+    "existing_modules": [
+      "FSRS v6 间隔重复记忆卡片",
+      "力导向知识图谱 (WordGraph)",
+      "AI 智能词链生成 (AiLearning)",
+      "AI 助记符生成 (AiMnemonics)",
+      "离线 OCR (Tesseract)",
+      "单词本管理 (WordList/WordDetail)",
+      "复习会话 (ReviewSession)",
+      "分组管理 (Groups)",
+      "CSV/JSON 导入导出",
+      "统计面板 (Stats)"
+    ]
+  },
+  "modules": [
+    {
+      "module_id": "M1",
+      "module_name": "影子跟读学习模块",
+      "module_name_en": "Shadowing Learning Module",
+      "risk_level": "高",
+      "rationale": "涉及视频解码、音频录制、文件管理、B站API解析、字幕同步等多个技术领域，且需要与现有词汇库深度集成",
+      "capability_tags": [
+        "shadowing",
+        "video_playback",
+        "bilibili_import",
+        "local_video_import",
+        "subtitle_sync",
+        "sentence_segmentation",
+        "voice_recording",
+        "audio_playback",
+        "file_management",
+        "yt-dlp_integration"
+      ],
+      "description": "允许用户导入B站视频或本地视频文件，使用影子跟读法(Shadowing Method)练习英语口语和听力。用户可观看带字幕的视频，逐句进行跟读，录音后可回放对比原音与自己的发音。",
+      "business_flow": "用户打开影子跟读页面 → 选择导入视频（B站链接/本地文件）→ 系统下载/加载视频 → 语音识别生成句子级时间轴字幕 → 用户进入跟读模式 → 播放原音→用户跟读→录音→回放对比 → 支持跳转上一句/下一句/重复当前句",
+      "user_interaction_flow": [
+        {
+          "step": 1,
+          "action": "用户点击「影子跟读」入口",
+          "screen": "主页底部导航或扩展菜单",
+          "expected_result": "进入影子跟读主页，显示已导入视频列表（空态引导）"
+        },
+        {
+          "step": 2,
+          "action": "用户点击「导入视频」按钮",
+          "screen": "影子跟读主页",
+          "expected_result": "弹出导入方式选择对话框：B站链接 / 本地文件"
+        },
+        {
+          "step": 2.1,
+          "action": "选择「B站链接」→ 输入B站视频URL → 确认",
+          "screen": "导入方式选择弹窗",
+          "expected_result": "后台开始下载视频，显示下载进度条；下载完成后自动进入数据处理"
+        },
+        {
+          "step": 2.2,
+          "action": "选择「本地文件」→ 系统文件选择器检索视频文件（mp4/mkv/webm等）",
+          "screen": "系统文件选择器",
+          "expected_result": "选中文件后开始加载，显示处理进度"
+        },
+        {
+          "step": 3,
+          "action": "视频处理：提取音频 → Whisper语音识别 → 句子级分割对齐 → 生成SRT字幕",
+          "screen": "处理进度页",
+          "expected_result": "字幕生成完成，进入视频播放准备页面"
+        },
+        {
+          "step": 4,
+          "action": "用户点击视频进入播放界面，浏览完整视频带字幕",
+          "screen": "视频播放页",
+          "expected_result": "视频正常播放，字幕同步显示，支持暂停/快进/快退"
+        },
+        {
+          "step": 5,
+          "action": "用户切换至「跟读模式」",
+          "screen": "视频播放页底部模式切换",
+          "expected_result": "界面切换为句子列表视图，显示当前句的高亮字幕"
+        },
+        {
+          "step": 6,
+          "action": "听原音 → 按下录音按钮 → 模仿跟读 → 松开停止录音",
+          "screen": "跟读模式界面",
+          "expected_result": "录音保存成功，显示录音波形及时长"
+        },
+        {
+          "step": 7,
+          "action": "点击「回放对比」— 先播放原音，后播放用户录音（可设置循环对比）",
+          "screen": "跟读模式界面",
+          "expected_result": "原音与用户录音交替播放，界面显示当前播放源标识"
+        },
+        {
+          "step": 8,
+          "action": "点击「下一句」继续跟读，或点击「完成」退出",
+          "screen": "跟读模式界面",
+          "expected_result": "进度保存，返回视频详情页"
+        }
+      ],
+      "function_points": [
+        {
+          "fp_id": "M1-F1",
+          "name": "B站视频导入",
+          "priority": "P0",
+          "description": "支持用户输入B站(Bilibili)视频链接，使用yt-dlp Android wrapper下载视频及字幕",
+          "acceptance_criteria": [
+            "AC1-1: 输入标准B站视频URL（如 https://www.bilibili.com/video/BV1***）可正常识别并开始下载",
+            "AC1-2: 下载过程中显示实时进度（百分比/速度/剩余时间）",
+            "AC1-3: 下载完成后自动提取音频，进入Whisper识别阶段",
+            "AC1-4: 支持下载B站自带的CC字幕（若有）作为备选",
+            "AC1-5: 下载失败时显示明确错误原因（网络/链接无效/格式不支持）并允许重试",
+            "AC1-6: 下载文件存储于应用私有目录，不占用公共存储空间",
+            "AC1-7: 同时下载多个视频时排队处理，不抢占前台"
+          ]
+        },
+        {
+          "fp_id": "M1-F2",
+          "name": "本地视频文件导入",
+          "priority": "P0",
+          "description": "支持用户从系统文件选择器导入本地视频文件进行处理",
+          "acceptance_criteria": [
+            "AC2-1: 调用 SAF (Storage Access Framework) 打开系统文件选择器，过滤视频文件类型",
+            "AC2-2: 支持 mp4, mkv, webm, avi, mov 等常见视频格式",
+            "AC2-3: 文件选择后复制到应用私有目录处理，不破坏原文件",
+            "AC2-4: 大文件（≥500MB）处理时显示加载动画，不ANR",
+            "AC2-5: 文件格式不支持时给出明确提示"
+          ]
+        },
+        {
+          "fp_id": "M1-F3",
+          "name": "视频播放与字幕同步显示",
+          "priority": "P0",
+          "description": "ExoPlayer/Media3 播放视频，配合SRT/VTT字幕实现句子级同步显示",
+          "acceptance_criteria": [
+            "AC3-1: 视频流畅播放，支持暂停/继续/快进(10s)/快退(10s)",
+            "AC3-2: 字幕与视频时间轴精确同步（误差≤0.5s）",
+            "AC3-3: 字幕显示区域在视频下方或侧边，可根据用户偏好切换位置",
+            "AC3-4: 字幕文字大小/颜色可调节",
+            "AC3-5: 当前字幕以高亮/放大样式突出显示，已过字幕灰色显示",
+            "AC3-6: 支持点击字幕跳转到对应时间点",
+            "AC3-7: 播放速度可调（0.5x/0.75x/1.0x/1.25x/1.5x）"
+          ]
+        },
+        {
+          "fp_id": "M1-F4",
+          "name": "句子级分割与逐句跟读",
+          "priority": "P0",
+          "description": "使用Whisper对音频进行语音识别并生成带时间戳的句子级分割，支持逐句跟读操作",
+          "acceptance_criteria": [
+            "AC4-1: Whisper输出按句子分割，每句有精确的开始/结束时间戳",
+            "AC4-2: 句子分割边界合理（不超过20词或5秒的句子不分割）",
+            "AC4-3: 句子列表以时间轴方式呈现，可滚动浏览全部句子",
+            "AC4-4: 选定句子后自动跳转到视频对应时间点",
+            "AC4-5: 支持手动调整句子分割边界（合并/拆分相邻句子）"
+          ]
+        },
+        {
+          "fp_id": "M1-F5",
+          "name": "跟读录音与回放对比",
+          "priority": "P0",
+          "description": "用户可对当前句子进行录音，回放时对比原音与自己的发音",
+          "acceptance_criteria": [
+            "AC5-1: 录音通过 MediaRecorder 或 AudioRecord 实现，格式为 AAC/Opus 压缩格式",
+            "AC5-2: 录音按钮为按住录音/松开停止模式（Push-to-Talk）",
+            "AC5-3: 单次录音最长15秒（与单句时长匹配）",
+            "AC5-4: 录音前检查麦克风权限，未授权时弹出权限请求",
+            "AC5-5: 回放对比模式：先自动播放原音段，停顿0.5s后播放用户录音",
+            "AC5-6: 支持循环对比（原音→用户→原音→用户，可设置循环次数1-5次）",
+            "AC5-7: 录音文件以句子ID命名存储于应用私有目录，支持删除重录",
+            "AC5-8: 录音波形可视化显示（AudioWaveformView）"
+          ]
+        },
+        {
+          "fp_id": "M1-F6",
+          "name": "跟读进度管理",
+          "priority": "P1",
+          "description": "记录每个视频的跟读进度（已跟读句子数/总句子数），支持进度保存与恢复",
+          "acceptance_criteria": [
+            "AC6-1: 每个视频的跟读进度持久化存储于 Room 数据库",
+            "AC6-2: 视频列表页显示每部视频的跟读完成进度条",
+            "AC6-3: 再次打开视频自动跳转到上次跟读的句子位置",
+            "AC6-4: 支持重置进度或标记为已完成",
+            "AC6-5: 跟读完成的句子数计入每日学习统计"
+          ]
+        },
+        {
+          "fp_id": "M1-F7",
+          "name": "视频管理（列表/删除/重命名）",
+          "priority": "P1",
+          "description": "管理已导入的视频资源，支持查看列表、删除、重命名操作",
+          "acceptance_criteria": [
+            "AC7-1: 视频列表以卡片形式展示视频封面、标题、时长、跟读进度",
+            "AC7-2: 支持长按删除视频及关联音频/字幕文件",
+            "AC7-3: 删除时确认弹窗提示「删除后将同时删除所有跟读录音，是否继续？」",
+            "AC7-4: 删除操作同时清理数据库记录和文件系统数据"
+          ]
+        },
+        {
+          "fp_id": "M1-F8",
+          "name": "从跟读提取单词到词库",
+          "priority": "P2",
+          "description": "允许用户从字幕中选择生词，一键添加到词鼠书记主词库",
+          "acceptance_criteria": [
+            "AC8-1: 字幕文本支持长按选择单词",
+            "AC8-2: 选中单词弹出操作菜单：「添加到词库」「查询释义」",
+            "AC8-3: 添加到词库后，使用现有 AI 翻译流程自动补全释义/音标/例句",
+            "AC8-4: 添加到词库后在当前单词旁显示已添加标识 ✓"
+          ]
+        }
+      ],
+      "technical_approach": {
+        "recommended_libraries": [
+          "yt-dlp-android (youtubedl-android) — B站视频下载",
+          "Media3 (ExoPlayer) — 视频播放",
+          "whisper.cpp (Android JNI) — 离线语音识别与句子分割",
+          "MediaRecorder — 跟读录音",
+          "Room — 跟读进度持久化"
+        ],
+        "key_decisions": [
+          "视频文件存储在应用内部私有目录（context.filesDir/videos/）",
+          "录音文件存储在应用内部私有目录（context.filesDir/recordings/）",
+          "Whisper模型考虑在线API优先（复用现有DeepSeek API Key），后续可切换离线whisper.cpp",
+          "字幕格式统一使用SRT（兼容性好，可手动编辑）",
+          "B站下载使用 yt-dlp 的 Android wrapper，避免原生库编译"
+        ]
+      },
+      "dependencies": {
+        "new_permissions": [
+          "RECORD_AUDIO — 跟读录音（dangerous级，运行时动态申请）",
+          "READ_EXTERNAL_STORAGE / READ_MEDIA_VIDEO — 本地视频导入（Android 13+ 使用 PhotoPicker替代）"
+        ],
+        "new_libraries": [
+          "androidx.media3:media3-exoplayer (视频播放)",
+          "androidx.media3:media3-ui (播放器UI)",
+          "com.github.yausername:youtubedl-android (yt-dlp下载)",
+          "com.github.yausername:ffmpeg-android (音视频处理)"
+        ],
+        "new_tables": [
+          "shadowing_videos (视频元数据表)",
+          "shadowing_sentences (句子分割表)",
+          "shadowing_records (跟读记录表)"
+        ]
+      },
+      "constraints": {
+        "offline_priority": "视频播放与字幕显示完全离线；B站下载需要网络；Whisper识别可在离线whisper.cpp或在线API间选择",
+        "permission_minimization": "仅声明 RECORD_AUDIO（必选）和 READ_MEDIA_VIDEO（Android 13+必选）；导入文件使用 SAF 而非存储权限",
+        "data_localization": "所有下载的视频、字幕、录音文件保存在应用私有目录，用户可清理"
+      }
+    },
+    {
+      "module_id": "M2",
+      "module_name": "发音测评与纠正模块",
+      "module_name_en": "Pronunciation Assessment & Correction Module",
+      "risk_level": "中",
+      "rationale": "涉及音素级语音识别和GOP算法实现，依赖AI API，但对原生系统侵入较小，主要作为独立的测评流程",
+      "capability_tags": [
+        "pronunciation_assessment",
+        "gop_algorithm",
+        "phoneme_scoring",
+        "whisper_transcription",
+        "ai_correction",
+        "mispronunciation_detection",
+        "speech_analysis",
+        "progress_tracking"
+      ],
+      "description": "用户在跟读后或独立录音后，利用AI对英语发音进行音素级测评，指出具体哪个音素发得不标准，并给出纠正建议。可结合Whisper+GOP方案或DeepSeek AI分析。",
+      "business_flow": "用户获得跟读录音或进入发音测评页面 → 选择要测评的句子/单词 → 系统提交音频进行AI分析 → 返回音素级评分 → 高亮发音有问题的音素 → 显示纠正建议（舌位/口型描述）→ 用户可重新录音测试",
+      "user_interaction_flow": [
+        {
+          "step": 1,
+          "action": "用户从跟读录音列表或独立测评入口进入发音测评",
+          "screen": "发音测评主页",
+          "expected_result": "显示可测评的录音列表（跟读录音/独立录音）"
+        },
+        {
+          "step": 2,
+          "action": "用户选择一条录音，点击「开始测评」",
+          "screen": "发音测评主页",
+          "expected_result": "进入测评页面，显示待测评的句子原文"
+        },
+        {
+          "step": 3,
+          "action": "系统提交音频进行AI分析（Whisper转录 + GOP音素评分）",
+          "screen": "测评结果页（加载中）",
+          "expected_result": "显示分析进度（转录中→音素对齐→评分计算）"
+        },
+        {
+          "step": 4,
+          "action": "结果返回，显示整体评分（百分制）",
+          "screen": "测评结果页",
+          "expected_result": "顶部显示整体发音得分及等级（优秀/良好/一般/需改进）"
+        },
+        {
+          "step": 5,
+          "action": "逐音素高亮显示：绿色=发音正确，红色=发音偏差，黄色=基本合格",
+          "screen": "测评结果页",
+          "expected_result": "句子中的每个音素以颜色标记，错误音素闪烁提醒，点击可听标准音"
+        },
+        {
+          "step": 6,
+          "action": "系统显示纠正建议：舌位描述、口型示意图、常见错误分析",
+          "screen": "测评结果页 — 建议区域",
+          "expected_result": "对每个标红的音素显示文字纠正建议，提供标准发音音频"
+        },
+        {
+          "step": 7,
+          "action": "用户可点击「重新录音测评」改进发音后再次测评",
+          "screen": "测评结果页",
+          "expected_result": "再次调用录音流程，重新测评并显示与上次的得分对比"
+        }
+      ],
+      "function_points": [
+        {
+          "fp_id": "M2-F1",
+          "name": "录音测评 — 整体发音评分",
+          "priority": "P0",
+          "description": "对用户的英语录音进行整体发音准确性评分，生成百分制得分和等级",
+          "acceptance_criteria": [
+            "AC1-1: 用户可选择已有跟读录音或现场录音进行测评",
+            "AC1-2: 现场录音需先检查麦克风权限",
+            "AC1-3: 录音时长15秒以内，超出部分截断",
+            "AC1-4: 评分前显示待测评的参考文本（用户可手动修改）",
+            "AC1-5: 返回0-100分的整体评分，精确到整数",
+            "AC1-6: 评分附带等级：≥90=优秀 / 75-89=良好 / 60-74=一般 / <60=需改进",
+            "AC1-7: 整体评分计算时间不超过15秒（在线API情况下）"
+          ]
+        },
+        {
+          "fp_id": "M2-F2",
+          "name": "音素级GOP评分",
+          "priority": "P0",
+          "description": "使用GOP（Goodness of Pronunciation）算法计算每个音素的发音准确度分数",
+          "acceptance_criteria": [
+            "AC2-1: 将用户录音的音频与参考文本进行音素级对齐",
+            "AC2-2: 每个音素（phoneme）返回0-1的GOP分数",
+            "AC2-3: GOP<0.5标记为错误（红色），0.5-0.7标记为偏差（黄色），>0.7标记为正确（绿色）",
+            "AC2-4: 错误音素在句子视图中的突出显示位置与时间戳精确对应",
+            "AC2-5: 支持标准英语音素集（IPA，含元音、辅音约44个音素）"
+          ]
+        },
+        {
+          "fp_id": "M2-F3",
+          "name": "错误音素纠正建议",
+          "priority": "P0",
+          "description": "对于评分低的音素，利用AI生成文字的纠正建议，包括舌位描述、口型说明、改进练习",
+          "acceptance_criteria": [
+            "AC3-1: 对每个标记为红色的错误音素提供至少一条纠正建议",
+            "AC3-2: 建议内容包括：正确发音的舌位描述（如「舌尖抵上齿龈」）、口型说明（如「嘴唇微微圆起」）",
+            "AC3-3: 建议内容可参考IPA国际音标描述，提供中英双语",
+            "AC3-4: 提供该音素的标准发音音频示例（点击播放）",
+            "AC3-5: 纠正建议生成调用现有的DeepSeek API（复用现有API Key、连接超时等配置）",
+            "AC3-6: 建议应当具体可操作，避免泛泛而谈的「多听多练」"
+          ]
+        },
+        {
+          "fp_id": "M2-F4",
+          "name": "AI对比式诊断报告",
+          "priority": "P1",
+          "description": "将用户录音文本与标准文本进行AI对比分析，指出漏读/误读/添加的词或音素",
+          "acceptance_criteria": [
+            "AC4-1: AI对比参考文本与用户实际朗读内容，高亮差异部分",
+            "AC4-2: 漏读词以~~删除线~~标记",
+            "AC4-3: 误读词以**红色**标记并显示用户实际发音的近似拼写",
+            "AC4-4: 额外添加的词以蓝色标记",
+            "AC4-5: 诊断报告可分享为文本"
+          ]
+        },
+        {
+          "fp_id": "M2-F5",
+          "name": "发音进步追踪",
+          "priority": "P1",
+          "description": "记录每次发音测评的评分历史，展示发音进步曲线",
+          "acceptance_criteria": [
+            "AC5-1: 每次测评的评分、句子、时间戳持久化存储",
+            "AC5-2: 按日期/句子维度展示评分变化趋势折线图",
+            "AC5-3: 每句句子的多次测评评分对比显示（最近3次）",
+            "AC5-4: 常见错误音素统计（饼图/柱状图，显示哪些音素错误率最高）",
+            "AC5-5: 进步追踪不占新增权限，数据存于 Room 数据库"
+          ]
+        },
+        {
+          "fp_id": "M2-F6",
+          "name": "标准发音音库（参考音频）",
+          "priority": "P2",
+          "description": "包含英语44个国际音标的独立标准发音音频库，用户可随时查阅和模仿",
+          "acceptance_criteria": [
+            "AC6-1: 音标发音库覆盖英语44个IPA音素（元音20个+辅音24个）",
+            "AC6-2: 每个音素附有标准发音音频（内置在assets或首次使用时下载）",
+            "AC6-3: 音素以IPA符号展示，辅以示例单词",
+            "AC6-4: 支持音素分类浏览（元音/辅音、短元音/长元音/双元音等）",
+            "AC6-5: 音标发音库约500KB以内，随APK打包"
+          ]
+        }
+      ],
+      "technical_approach": {
+        "recommended_approaches": [
+          {
+            "approach": "Whisper + GOP 离线方案",
+            "description": "使用 whiper.cpp (Android JNI) 进行语音识别和音素对齐，实现GOP评分，完全离线运行",
+            "pros": ["完全离线，不依赖网络", "隐私保护最好"],
+            "cons": ["APK体积增加约80MB（Whisper模型）", "音素对齐精度低于云端方案"],
+            "status": "推荐远期方案，v1暂不实现"
+          },
+          {
+            "approach": "DeepSeek API 分析方案",
+            "description": "复用现有DeepSeek API，通过提示词让AI分析发音文本与标准文本的差异，生成评分和纠正建议",
+            "pros": ["无需新增模型依赖", "复用现有API Key和基础设施", "实现快"],
+            "cons": ["纯文本级分析，无音素级精度", "无法做真实的GOP声学评分"],
+            "status": "推荐v1快速实现方案"
+          },
+          {
+            "approach": "Whisper转录 + DeepSeek GAP分析",
+            "description": "使用在线Whisper API（或OpenAI Whisper）转录用户录音为文本+时间戳，再通过DeepSeek API做音素级差异分析",
+            "pros": ["转录准确度高", "可用时间戳做近似音素对齐"],
+            "cons": ["需要两次API调用", "需要用户自己配置Whisper端点"],
+            "status": "推荐v1折中方案"
+          }
+        ],
+        "recommended_libraries": [
+          "com.squareup.okhttp3:okhttp — 复用现有网络层调用AI API",
+          "com.google.code.gson:gson — 复用现有JSON解析",
+          "androidx.media3:media3-exoplayer — 标准发音音频播放",
+          "com.github.PhilJay:MPAndroidChart — 评分趋势图（可选，或用Compose Canvas自绘）"
+        ],
+        "key_decisions": [
+          "v1 先实现「DeepSeek文本级分析」快速验证价值",
+          "v2 评估是否引入 whisper.cpp 实现真实音素级GOP",
+          "标准发音音库（IPA音素44个）随APK打包在assets/audio/phonemes/",
+          "测评结果存储于Room数据库的独立表 assessment_records"
+        ]
+      },
+      "dependencies": {
+        "new_permissions": [
+          "RECORD_AUDIO — 现场录音测评（若与M1共用则无需重复申明）"
+        ],
+        "new_libraries": [
+          "com.github.PhilJay:MPAndroidChart:v3.1.0 — 进步趋势图（可选）",
+          "标准发音音频文件 — 44个IPA音素.mp3 (约500KB)"
+        ],
+        "new_tables": [
+          "assessment_records (测评记录表)",
+          "phoneme_scores (各音素评分表)",
+          "assessment_trends (进步趋势聚合视图)"
+        ],
+        "api_usage": "复用现有 DeepSeek API Key，新增 prompt 模板用于发音分析和纠正建议生成。预估每词测评约消耗 500 tokens（分析+建议）。"
+      },
+      "constraints": {
+        "offline_priority": "标准发音音库和音标浏览可完全离线；发音测评依赖AI API需要网络；GOP算法离线实现需v2推进",
+        "permission_minimization": "只复用RECORD_AUDIO权限（与M1共享）；不使用网络位置/身体传感器等无关权限",
+        "data_localization": "录音文件仅保存用户主动测评的片段，测评结果仅存本地数据库，不主动上传至任何第三方服务器"
+      }
+    }
+  ],
+  "cross_module_dependencies": [
+    {
+      "from": "M2（发音测评）",
+      "to": "M1（影子跟读）",
+      "dependency": "M2直接复用M1的跟读录音作为测评输入源",
+      "type": "强依赖",
+      "design_implication": "M2的录音选择页面需展示 M1 的录音记录；建议M1的Recording数据表设计时预留pronunciation_status字段供M2使用"
+    },
+    {
+      "from": "M1（影子跟读）",
+      "to": "现有词库",
+      "dependency": "M1-F8从字幕提取单词需调用现有AI翻译流程",
+      "type": "中依赖",
+      "design_implication": "复用WordDetailViewModel的AI翻译逻辑，不需重复实现"
+    },
+    {
+      "from": "M2（发音测评）",
+      "to": "现有AI基础设施",
+      "dependency": "M2-F3纠正建议生成调用现有DeepSeek API",
+      "type": "强依赖",
+      "design_implication": "复用AiApiClient、AiApiRequestBuilder的HTTP调用能力和API Key管理"
+    }
+  ],
+  "architecture_impact": {
+    "new_packages": [
+      "com.wordmemo.app.ui.screen.shadowing — 影子跟读UI层",
+      "com.wordmemo.app.ui.screen.pronunciation — 发音测评UI层",
+      "com.wordmemo.app.data.shadowing — 影子跟读数据层（Room DAO+Entity）",
+      "com.wordmemo.app.data.pronunciation — 发音测评数据层（Room DAO+Entity）",
+      "com.wordmemo.app.domain.usecase.shadowing — 影子跟读业务用例",
+      "com.wordmemo.app.domain.usecase.pronunciation — 发音测评业务用例"
+    ],
+    "modified_files": [
+      "app/build.gradle.kts — 新增依赖库",
+      "AndroidManifest.xml — 新增 RECORD_AUDIO 权限",
+      "Screen.kt — 新增路由 Shadowing / PronunciationAssessment",
+      "NavGraph.kt — 新增导航路由注册",
+      "WordMemoDatabase.kt — 新增 Room Entity 注册（版本迁移）",
+      "Di/DatabaseModule.kt — 新增 DAO 注入",
+      "SettingsScreen.kt — 可选：新增音素库入口"
+    ],
+    "version_migration": {
+      "next_version": "v8 (versionCode=80000)",
+      "db_migration_version": "待定（当前Room版本号需确认）",
+      "breaking_changes": "无破坏性变更，只有新增表和字段"
+    }
+  },
+  "non_functional_requirements": {
+    "performance": [
+      "视频首次加载时间 ≤ 3秒（本地文件）/ ≤ 10秒（B站下载完成后）",
+      "Whisper转录处理 ≤ 视频时长 × 0.3（如10分钟视频3分钟内完成）",
+      "发音测评API调用 ≤ 15秒",
+      "APK体积增加 ≤ 15MB（不含可选的whisper.cpp模型）",
+      "应用冷启动耗时增加 ≤ 200ms"
+    ],
+    "security": [
+      "录音文件存储于应用私有目录，其他应用无法读取",
+      "B站下载视频不保存用户cookie或登录态",
+      "API调用复用现有的EncryptedStringConverter加密存储机制",
+      "无网络位置/联系人/相册等无关权限请求"
+    ],
+    "compatibility": [
+      "支持Android 8.0 (API 26) 及以上",
+      "国产手机（华为/小米/OPPO/Vivo）兼容，不依赖Google Play Services",
+      "视频解码使用系统MediaCodec（Media3自动处理）",
+      "支持屏幕方向旋转（横屏看视频，竖屏跟读）"
+    ],
+    "accessibility": [
+      "所有操作按钮有ContentDescription",
+      "字幕字体大小至少支持三级（小/中/大）",
+      "录音按钮支持TalkBack焦点"
+    ]
+  },
+  "release_plan": {
+    "phase": "v8.0 (MVP)",
+    "estimated_effort": "4-6周（1-2人Android开发）",
+    "milestones": [
+      {
+        "milestone": "M1.1",
+        "week": 1,
+        "deliverable": "视频导入+播放+字幕同步基础功能可运行",
+        "dependencies": "Media3集成"
+      },
+      {
+        "milestone": "M1.2",
+        "week": 2,
+        "deliverable": "句子分割+跟读录音+回放对比完成",
+        "dependencies": "Whisper集成或简化版的句子分割"
+      },
+      {
+        "milestone": "M2.1",
+        "week": 3,
+        "deliverable": "发音测评DeepSeek API集成+整体评分+文本级分析",
+        "dependencies": "现有AI通道"
+      },
+      {
+        "milestone": "M2.2",
+        "week": 4,
+        "deliverable": "纠正建议生成+标准发音音库",
+        "dependencies": "M2.1完成"
+      },
+      {
+        "milestone": "Integration",
+        "week": 5,
+        "deliverable": "两模块集成+跟读→测评数据打通+从字幕提取单词到词库",
+        "dependencies": "M1.2 + M2.2"
+      },
+      {
+        "milestone": "QA & Polish",
+        "week": 6,
+        "deliverable": "全流程测试+国产手机兼容测试+UI打磨",
+        "dependencies": "Integration"
+      }
+    ]
+  },
+  "appendix": {
+    "glossary": {
+      "Shadowing": "影子跟读法 — 听原音后立即模仿跟读的英语口语训练方法",
+      "GOP": "Goodness of Pronunciation — 发音准确度评分算法，通过计算音素后验概率评估发音质量",
+      "Phoneme": "音素 — 语言中最小的语音单位，英语约有44个音素",
+      "IPA": "International Phonetic Alphabet — 国际音标，标准化的语音标注系统",
+      "Whisper": "OpenAI开发的语音识别模型，支持多语言转写和句子级时间戳",
+      "yt-dlp": "youtube-dl的分支，支持B站等数百个视频网站的视频下载",
+      "SAF": "Storage Access Framework — Android存储访问框架，无需存储权限即可选择文件",
+      "SRT": "SubRip字幕格式 — 最常见的文本字幕格式，包含序号、时间轴、字幕文本"
+    },
+    "references": [
+      "EchoTalk — 开源影子跟读PWA应用 (参考UI交互设计)",
+      "Parroto — 影子跟读应用 (参考跟读流程)",
+      "Shadowing.app — 影子跟读应用 (参考评分机制)",
+      "Whisper + GOP — 开源发音测评方案 (参考算法实现)",
+      "Azure Speech Services — 商业化发音测评API (参考评分标准)"
+    ]
+  }
+}

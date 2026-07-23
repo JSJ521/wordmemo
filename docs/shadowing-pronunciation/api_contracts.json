@@ -1,0 +1,284 @@
+{
+  "title": "词鼠书记 WordMemo — 影子跟读 + 发音测评 接口契约",
+  "version": "v1.0",
+  "updated": "2026-07-22",
+  "contracts": [
+    {
+      "name": "VideoImportService",
+      "type": "data",
+      "package": "com.wordmemo.app.data.shadowing",
+      "signature": "class VideoImportService @Inject constructor(\n    private val context: Context,\n    private val shadowingVideoDao: ShadowingVideoDao\n)",
+      "methods": [
+        {
+          "name": "downloadFromBilibili",
+          "return": "Result<ShadowingVideoEntity>",
+          "params": [
+            {"name": "url", "type": "String", "desc": "B站视频URL (b23.tv 或 bilibili.com)"}
+          ],
+          "throws": ["VideoDownloadException", "UnsupportedUrlException", "NetworkException"]
+        },
+        {
+          "name": "importLocalVideo",
+          "return": "Result<ShadowingVideoEntity>",
+          "params": [
+            {"name": "uri", "type": "android.net.Uri", "desc": "本地视频URI（通过SAF文件选择器获取）"}
+          ],
+          "throws": ["FileCopyException", "UnsupportedFormatException"]
+        },
+        {
+          "name": "cancelDownload",
+          "return": "Unit",
+          "params": [{"name": "videoId", "type": "Long"}]
+        }
+      ],
+      "data_flow": "用户点击'导入B站视频' → 输入URL → yt-dlp解析→下载mp4→存至app内部存储(shadowing_videos目录) → 写入ShadowingVideoEntity到Room → UI刷新列表.\n本地导入: SAF文件选择器 → ContentResolver复制到内部存储 → 同上.",
+      "layout_constraints": "无UI. 进度通过Flow<DownloadProgress>暴露给ViewModel.",
+      "notes": "v1使用youtubedl-android wrapper. 下载进度通过共享Flow回调. 下载目录: context.filesDir/shadowing_videos/"
+    },
+    {
+      "name": "ShadowingRepository",
+      "type": "repo",
+      "package": "com.wordmemo.app.domain.shadowing.repository",
+      "signature": "interface ShadowingRepository",
+      "methods": [
+        {
+          "name": "observeVideos",
+          "return": "Flow<List<ShadowingVideo>>",
+          "params": [],
+          "desc": "观察所有影子跟读视频列表"
+        },
+        {
+          "name": "getVideoById",
+          "return": "ShadowingVideo?",
+          "params": [{"name": "videoId", "type": "Long"}]
+        },
+        {
+          "name": "deleteVideo",
+          "return": "Unit",
+          "params": [{"name": "videoId", "type": "Long"}],
+          "desc": "删除视频及关联文件"
+        },
+        {
+          "name": "getSentencesForVideo",
+          "return": "Flow<List<ShadowingSentence>>",
+          "params": [{"name": "videoId", "type": "Long"}],
+          "desc": "获取视频的句子列表（按时间戳排序）"
+        },
+        {
+          "name": "updateSentence",
+          "return": "Unit",
+          "params": [{"name": "sentence", "type": "ShadowingSentence"}]
+        },
+        {
+          "name": "saveRecording",
+          "return": "Long",
+          "params": [
+            {"name": "videoId", "type": "Long"},
+            {"name": "sentenceId", "type": "Long"},
+            {"name": "audioFilePath", "type": "String"},
+            {"name": "durationMs", "type": "Long"}
+          ],
+          "desc": "保存用户跟读录音, 返回recordId"
+        },
+        {
+          "name": "getRecordingsForSentence",
+          "return": "List<ShadowingRecord>",
+          "params": [{"name": "sentenceId", "type": "Long"}]
+        },
+        {
+          "name": "deleteRecording",
+          "return": "Unit",
+          "params": [{"name": "recordId", "type": "Long"}]
+        }
+      ],
+      "data_flow": "ViewModel → ShadowingRepository → ShadowingVideoDao / ShadowingSentenceDao / ShadowingRecordDao → Room DB.\n数据返向: Room Flow → Repository Flow → ViewModel StateFlow → Compose UI.",
+      "layout_constraints": "无UI约束. Repository层纯数据操作."
+    },
+    {
+      "name": "PronunciationAssessor",
+      "type": "ai",
+      "package": "com.wordmemo.app.domain.pronunciation",
+      "signature": "class PronunciationAssessor @Inject constructor(\n    private val aiApiClient: AiApiClient,\n    private val appConfigDao: AppConfigDao\n)",
+      "methods": [
+        {
+          "name": "assessPronunciation",
+          "return": "PronunciationAssessment",
+          "params": [
+            {"name": "sentenceText", "type": "String", "desc": "可选的原文句子文本"},
+            {"name": "targetText", "type": "String", "desc": "用户朗读的目标文本"},
+            {"name": "recordedText", "type": "String", "desc": "ASR识别的用户实际朗读文本"},
+            {"name": "wordTimings", "type": "List<WordTiming>?", "desc": "v2: ASR返回的逐词时间戳"}
+          ],
+          "throws": ["AiApiException", "AssessmentFailedException"],
+          "desc": "v1: 调用DeepSeek API进行文本级差异分析. v2: 接入whisper.cpp实现本地音素级测评."
+        },
+        {
+          "name": "transcribeAudio",
+          "return": "TranscriptionResult",
+          "params": [
+            {"name": "audioFilePath", "type": "String"},
+            {"name": "language", "type": "String", "default": "en"}
+          ],
+          "desc": "v1: ASR调用在线API(复用DeepSeek API). v2: 切换到本地whisper.cpp."
+        }
+      ],
+      "data_flow": "[v1] 音频文件路径 → transcribeAudio() → 在线ASR → 返回转录文本 → assessPronunciation(原文, 转录) → DeepSeek API → 返回差异分析 → 存入Room.\n[v2 计划] 音频文件 → whisper.cpp本地推理 → 逐词时间戳 → 音素级别对比 → 给出分维度得分.",
+      "layout_constraints": "无UI. 测评结果通过PronunciationAssessment模型类传递."
+    },
+    {
+      "name": "ShadowingViewModel — ShadowingScreen UI State Contract",
+      "type": "viewmodel",
+      "package": "com.wordmemo.app.ui.shadowing",
+      "signature": "@HiltViewModel class ShadowingViewModel @Inject constructor(\n    private val shadowingRepository: ShadowingRepository,\n    private val videoImportService: VideoImportService\n)",
+      "ui_state": {
+        "name": "ShadowingUiState",
+        "fields": [
+          {"name": "videoList", "type": "List<ShadowingVideo>", "desc": "视频列表", "init": "emptyList()"},
+          {"name": "selectedVideo", "type": "ShadowingVideo?", "desc": "当前选中的视频", "init": "null"},
+          {"name": "sentences", "type": "List<ShadowingSentence>", "desc": "当前视频的句子列表", "init": "emptyList()"},
+          {"name": "currentSentenceIndex", "type": "Int", "desc": "当前跟读句子序号", "init": "0"},
+          {"name": "isPlayingVideo", "type": "Boolean", "desc": "视频是否正在播放", "init": "false"},
+          {"name": "isRecording", "type": "Boolean", "desc": "是否正在录音", "init": "false"},
+          {"name": "recordingState", "type": "RecordingState", "desc": "录音状态: Idle/Recording/Playback", "init": "RecordingState.Idle"},
+          {"name": "downloadProgress", "type": "DownloadProgress?", "desc": "导入视频下载进度", "init": "null"},
+          {"name": "error", "type": "String?", "desc": "错误信息", "init": "null"}
+        ]
+      },
+      "events": {
+        "name": "ShadowingEvent",
+        "sealed_interface": true,
+        "variants": [
+          "data object LoadVideos",
+          "data class SelectVideo(val videoId: Long)",
+          "data object PlayVideo",
+          "data object PauseVideo",
+          "data object StartRecording",
+          "data object StopRecording",
+          "data object PlayRecording",
+          "data object DeleteRecording",
+          "data class ImportBilibili(val url: String)",
+          "data object ImportLocalVideo",
+          "data object NextSentence",
+          "data object PreviousSentence",
+          "data class JumpToSentence(val index: Int)",
+          "data class DeleteVideo(val videoId: Long)"
+        ]
+      },
+      "data_flow": "用户操作 → ShadowingEvent → ViewModel.onEvent() → (调用Repository/Service) → 更新ShadowingUiState(StateFlow) → Compose重组.",
+      "layout_constraints": "ShadowingScreen需要: 上方视频播放区(ExoPlayer), 中间句子列表+高亮当前句, 下方录音/回放控制栏."
+    },
+    {
+      "name": "PronunciationViewModel — PronunciationScreen UI State Contract",
+      "type": "viewmodel",
+      "package": "com.wordmemo.app.ui.pronunciation",
+      "signature": "@HiltViewModel class PronunciationViewModel @Inject constructor(\n    private val pronunciationAssessor: PronunciationAssessor,\n    private val shadowingRepository: ShadowingRepository\n)",
+      "ui_state": {
+        "name": "PronunciationUiState",
+        "fields": [
+          {"name": "targetSentence", "type": "String", "desc": "待测评的原文句子", "init": "\"\""},
+          {"name": "recordedText", "type": "String", "desc": "ASR转录的用户朗读文本", "init": "\"\""},
+          {"name": "assessment", "type": "PronunciationAssessment?", "desc": "最新测评结果", "init": "null"},
+          {"name": "isTranscribing", "type": "Boolean", "desc": "是否正在ASR转写", "init": "false"},
+          {"name": "isAssessing", "type": "Boolean", "desc": "是否正在AI测评", "init": "false"},
+          {"name": "recordingState", "type": "RecordingState", "desc": "录音状态: Idle/Recording/Playback", "init": "RecordingState.Idle"},
+          {"name": "error", "type": "String?", "desc": "错误信息", "init": "null"},
+          {"name": "historyRecords", "type": "List<AssessmentRecord>", "desc": "历史测评记录", "init": "emptyList()"}
+        ]
+      },
+      "events": {
+        "name": "PronunciationEvent",
+        "sealed_interface": true,
+        "variants": [
+          "data class SetTargetSentence(val text: String)",
+          "data object StartRecording",
+          "data object StopRecording",
+          "data object PlayRecording",
+          "data object AssessPronunciation",
+          "data object LoadHistory",
+          "data class SelectRecording(val recordId: Long)"
+        ]
+      },
+      "data_flow": "用户选择原文句子 → SetTargetSentence → 点击录音 → StartRecording→系统录音 → StopRecording → 音频保存至ShadowingRecord → AssessPronunciation → transcribeAudio() → assessPronunciation() → 更新assessment → 存入AssessmentRecord → UI展示评分.",
+      "layout_constraints": "PronunciationScreen需要: 目标文本展示区, 录音控制按钮(开始/停止/回放), 评分结果卡片(准确率/流利度/完整度各维度)."
+    },
+    {
+      "name": "跨模块接口: M2(发音测评) 复用 M1(影子跟读) 录音的契约",
+      "type": "cross-module",
+      "description": "发音测评模块(M2)直接复用影子跟读模块(M1)的录音文件 + ShadowingRepository中的录音CRUD接口. 不重复实现录音存储逻辑.",
+      "contract": {
+        "dependency_direction": "M2 → M1",
+        "reused_interfaces": [
+          "ShadowingRepository.saveRecording() — 保存录音文件后返回recordId",
+          "ShadowingRepository.getRecordingsForSentence() — 获取某句子的所有录音列表",
+          "ShadowingRepository.deleteRecording() — 删除录音",
+          "ShadowingRecord 模型 — M2直接使用该模型作为录音源数据"
+        ],
+        "m2_specific_extensions": {
+          "fromShadowingRecord": "PronunciationViewModel 通过 selectRecording(recordId) 从 ShadowingRepository 加载 ShadowingRecord, 提取 audioFilePath 传递给 PronunciationAssessor.transcribeAudio()",
+          "assessment_result_storage": "测评结果存入本模块独立的 AssessmentRecord + PhonemeScore 表, 但通过 foreign key (recordId) 关联到 M1 的 shadowing_records 表"
+        },
+        "data_flow": "M2用户选择某条录音记录 → PronunciationViewModel.getRecordingsForSentence() [M1 API] → 得到录音列表 → 用户选取一条 → 提取audioFilePath → PronunciationAssessor.transcribeAudio(filePath) → AI测评 → 结果存M2的assessment_records表(关联recordId)"
+      },
+      "layout_constraints": "无额外UI约束. M2的PronunciationScreen可内嵌在ShadowingScreen的句子详情页, 也可独立入口."
+    },
+    {
+      "name": "ShadowingVideoDao",
+      "type": "data",
+      "package": "com.wordmemo.app.data.local.dao.shadowing",
+      "signature": "@Dao interface ShadowingVideoDao",
+      "methods": [
+        {"name": "observeAll", "return": "Flow<List<ShadowingVideoEntity>>", "params": [], "sql": "SELECT * FROM shadowing_videos ORDER BY created_at DESC"},
+        {"name": "getById", "return": "ShadowingVideoEntity?", "params": [{"name": "id", "type": "Long"}]},
+        {"name": "insert", "return": "Long", "params": [{"name": "video", "type": "ShadowingVideoEntity"}]},
+        {"name": "update", "return": "Unit", "params": [{"name": "video", "type": "ShadowingVideoEntity"}]},
+        {"name": "deleteById", "return": "Unit", "params": [{"name": "id", "type": "Long"}]}
+      ]
+    },
+    {
+      "name": "ShadowingSentenceDao",
+      "type": "data",
+      "package": "com.wordmemo.app.data.local.dao.shadowing",
+      "signature": "@Dao interface ShadowingSentenceDao",
+      "methods": [
+        {"name": "observeByVideoId", "return": "Flow<List<ShadowingSentenceEntity>>", "params": [{"name": "videoId", "type": "Long"}], "sql": "SELECT * FROM shadowing_sentences WHERE video_id = :videoId ORDER BY start_time ASC"},
+        {"name": "insertBatch", "return": "List<Long>", "params": [{"name": "sentences", "type": "List<ShadowingSentenceEntity>"}]},
+        {"name": "update", "return": "Unit", "params": [{"name": "sentence", "type": "ShadowingSentenceEntity"}]},
+        {"name": "deleteByVideoId", "return": "Unit", "params": [{"name": "videoId", "type": "Long"}]}
+      ]
+    },
+    {
+      "name": "ShadowingRecordDao",
+      "type": "data",
+      "package": "com.wordmemo.app.data.local.dao.shadowing",
+      "signature": "@Dao interface ShadowingRecordDao",
+      "methods": [
+        {"name": "observeBySentenceId", "return": "Flow<List<ShadowingRecordEntity>>", "params": [{"name": "sentenceId", "type": "Long"}], "sql": "SELECT * FROM shadowing_records WHERE sentence_id = :sentenceId ORDER BY created_at DESC"},
+        {"name": "getBySentenceId", "return": "List<ShadowingRecordEntity>", "params": [{"name": "sentenceId", "type": "Long"}]},
+        {"name": "insert", "return": "Long", "params": [{"name": "record", "type": "ShadowingRecordEntity"}]},
+        {"name": "deleteById", "return": "Unit", "params": [{"name": "id", "type": "Long"}]}
+      ]
+    },
+    {
+      "name": "AssessmentRecordDao",
+      "type": "data",
+      "package": "com.wordmemo.app.data.local.dao.pronunciation",
+      "signature": "@Dao interface AssessmentRecordDao",
+      "methods": [
+        {"name": "observeByRecordId", "return": "Flow<AssessmentRecordEntity?>", "params": [{"name": "recordId", "type": "Long"}], "desc": "通过关联的录音ID查询测评结果"},
+        {"name": "observeBySentenceId", "return": "Flow<List<AssessmentRecordEntity>>", "params": [{"name": "sentenceId", "type": "Long"}], "sql": "SELECT * FROM assessment_records WHERE sentence_id = :sentenceId ORDER BY created_at DESC"},
+        {"name": "insert", "return": "Long", "params": [{"name": "assessment", "type": "AssessmentRecordEntity"}]},
+        {"name": "getPhonemeScores", "return": "List<PhonemeScoreEntity>", "params": [{"name": "assessmentId", "type": "Long"}]}
+      ]
+    },
+    {
+      "name": "PhonemeScoreDao",
+      "type": "data",
+      "package": "com.wordmemo.app.data.local.dao.pronunciation",
+      "signature": "@Dao interface PhonemeScoreDao",
+      "methods": [
+        {"name": "insertBatch", "return": "List<Long>", "params": [{"name": "scores", "type": "List<PhonemeScoreEntity>"}]},
+        {"name": "getByAssessmentId", "return": "List<PhonemeScoreEntity>", "params": [{"name": "assessmentId", "type": "Long"}]}
+      ]
+    }
+  ]
+}
