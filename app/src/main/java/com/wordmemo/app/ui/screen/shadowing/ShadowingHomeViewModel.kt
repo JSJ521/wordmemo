@@ -30,7 +30,6 @@ sealed interface ShadowingHomeEvent {
     data object LoadVideos : ShadowingHomeEvent
     data class ImportBilibili(val url: String) : ShadowingHomeEvent
     data class ImportLocalFile(val uri: Uri) : ShadowingHomeEvent
-    data class ImportLocalFileWithSubtitle(val videoUri: Uri, val subtitleUri: Uri) : ShadowingHomeEvent
     data class DeleteVideo(val videoId: Long) : ShadowingHomeEvent
     data object ClearError : ShadowingHomeEvent
 }
@@ -64,7 +63,6 @@ class ShadowingHomeViewModel @Inject constructor(
             is ShadowingHomeEvent.LoadVideos -> loadVideos()
             is ShadowingHomeEvent.ImportBilibili -> importBilibili(event.url)
             is ShadowingHomeEvent.ImportLocalFile -> importLocalVideo(event.uri)
-            is ShadowingHomeEvent.ImportLocalFileWithSubtitle -> importLocalVideoWithSubtitle(event.videoUri, event.subtitleUri)
             is ShadowingHomeEvent.DeleteVideo -> deleteVideo(event.videoId)
             is ShadowingHomeEvent.ClearError -> _uiState.update { it.copy(error = null) }
         }
@@ -95,18 +93,6 @@ class ShadowingHomeViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(error = null, isLoading = true) }
             val result = videoImportService.importLocalVideo(uri)
-            result.onSuccess {
-                _uiState.update { it.copy(isLoading = false) }
-            }.onFailure { e ->
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
-            }
-        }
-    }
-
-    private fun importLocalVideoWithSubtitle(videoUri: Uri, subtitleUri: Uri) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(error = null, isLoading = true) }
-            val result = videoImportService.importLocalVideo(videoUri, subtitleUri)
             result.onSuccess {
                 _uiState.update { it.copy(isLoading = false) }
             }.onFailure { e ->

@@ -3,8 +3,6 @@ package com.wordmemo.app.ui.screen.shadowing
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
@@ -331,12 +329,12 @@ private fun EmptySentencesState() {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
             )
             Text(
-                text = "正在识别字幕...",
+                text = "暂无可用字幕",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "App 正在尝试以下方式获取字幕：\n内嵌字幕 → OCR识别 → 语音识别\n请稍后返回查看",
+                text = "导入视频时未识别到字幕。\n支持的视频类型：\n• 内嵌字幕轨道（MP4/MKV）\n• 硬字幕（画面底部固定字幕）\n• 语音可转文字的内容",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center

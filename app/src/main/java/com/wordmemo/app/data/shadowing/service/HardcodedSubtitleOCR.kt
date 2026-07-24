@@ -284,12 +284,27 @@ class HardcodedSubtitleOCR @Inject constructor(
 
     /**
      * 对 Bitmap 执行 OCR 识别。
+     * Tesseract 要求 Bitmap 格式为 ARGB_8888，否则静默返回空字符串。
      */
     private fun recognizeText(bitmap: Bitmap): String {
         val api = TessBaseAPI()
         try {
+            // 强制转换为 ARGB_8888（MediaMetadataRetriever 可能返回 RGB_565）
+            val argb = if (bitmap.config != Bitmap.Config.ARGB_8888) {
+                bitmap.copy(Bitmap.Config.ARGB_8888, false)
+            } else {
+                bitmap
+            } ?: run {
+                Log.w(TAG, "Bitmap 转换失败")
+                return ""
+            }
+
             api.init(context.filesDir.absolutePath, TESS_LANG)
-            api.setImage(bitmap)
+            api.setImage(argb)
+
+            if (argb !== bitmap) {
+                argb.recycle()
+            }
             return api.getUTF8Text() ?: ""
         } catch (e: Exception) {
             Log.w(TAG, "OCR 识别失败: ${e.message}")

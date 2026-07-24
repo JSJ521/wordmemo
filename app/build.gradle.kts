@@ -25,8 +25,8 @@ android {
         applicationId = "com.wordmemo.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 91100
-        versionName = "9.2"
+        versionCode = 92000
+        versionName = "9.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
