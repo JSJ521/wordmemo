@@ -67,13 +67,6 @@ fun ShadowingSessionScreen(
     var showSpeedPicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    // Subtitle file picker for re-uploading subtitles
-    val subtitleFilePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.reUploadSubtitle(it) }
-    }
-
     // 加载指定视频的句子数据
     LaunchedEffect(videoId) {
         viewModel.loadSentences(videoId)
@@ -208,12 +201,7 @@ fun ShadowingSessionScreen(
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
         } else if (uiState.sentences.isEmpty()) {
-            EmptySentencesState(
-                subtitlePath = uiState.videoSubtitlePath,
-                onSelectSubtitleFile = {
-                    subtitleFilePickerLauncher.launch(arrayOf("text/*", "application/x-subrip", "*/*"))
-                }
-            )
+            EmptySentencesState()
         } else {
             Column(
                 modifier = Modifier
@@ -327,10 +315,7 @@ fun ShadowingSessionScreen(
 // ==================== Empty Sentences State ====================
 
 @Composable
-private fun EmptySentencesState(
-    subtitlePath: String?,
-    onSelectSubtitleFile: () -> Unit
-) {
+private fun EmptySentencesState() {
     Box(
         modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
         contentAlignment = Alignment.Center
@@ -346,25 +331,16 @@ private fun EmptySentencesState(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
             )
             Text(
-                text = "暂无句子数据",
+                text = "正在识别字幕...",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "请选择字幕文件或导入带内嵌字幕的视频",
+                text = "App 正在尝试以下方式获取字幕：\n内嵌字幕 → OCR识别 → 语音识别\n请稍后返回查看",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
             )
-            FilledTonalButton(
-                onClick = onSelectSubtitleFile,
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                )
-            ) {
-                Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("选择字幕文件")
-            }
         }
     }
 }

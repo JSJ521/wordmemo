@@ -128,31 +128,6 @@ class ShadowingSessionViewModel @Inject constructor(
                 }
         }
     }
-
-    /**
-     * 重新上传字幕文件。
-     */
-    fun reUploadSubtitle(subtitleUri: Uri) {
-        val videoId = _uiState.value.currentVideoId
-        if (videoId < 0) return
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
-            val result = videoImportService.reUploadSubtitle(videoId, subtitleUri)
-            result.onSuccess { updatedVideo ->
-                _uiState.update {
-                    it.copy(
-                        videoSubtitlePath = updatedVideo.subtitlePath,
-                        isLoading = false
-                    )
-                }
-                loadSentences(videoId)
-            }.onFailure { e ->
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
-            }
-        }
-    }
-
     /** Called by the UI layer after it has processed a seek command */
     fun onSeekCompleted() {
         _uiState.update { it.copy(pendingSeekToSentenceMs = -1L) }
