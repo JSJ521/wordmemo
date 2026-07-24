@@ -59,8 +59,6 @@ enum class SubtitleSource {
     EXTERNAL,
     /** 视频内嵌字幕轨道 */
     EMBEDDED,
-    /** OCR 识别硬字幕 */
-    OCR_HARDCODED,
     /** ASR 语音识别生成 */
     ASR_GENERATED,
     /** 没有任何可用字幕 */
