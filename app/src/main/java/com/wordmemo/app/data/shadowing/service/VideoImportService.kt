@@ -84,7 +84,6 @@ class VideoImportService @Inject constructor(
     private val subtitleExtractor: SubtitleExtractor,
     private val subtitleGenerator: SubtitleGenerator,
     private val voskSubtitleGenerator: VoskSubtitleGenerator,
-    private val hardcodedSubtitleOCR: HardcodedSubtitleOCR,
     private val appConfigDao: AppConfigDao,
     private val bilibiliParser: BilibiliParser,
     private val youTubeParser: YouTubeParser
@@ -723,34 +722,7 @@ class VideoImportService @Inject constructor(
             Log.w(TAG, "内嵌字幕提取失败: ${e.message}")
         }
 
-        // ---- 第3步：OCR 硬字幕识别 ----
-        Log.i(TAG, "尝试 OCR 识别硬字幕: ${videoFile.name}")
-        try {
-            val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_ocr.srt")
-            val ocrResult = hardcodedSubtitleOCR.extractSubtitles(
-                videoPath = videoFile.absolutePath,
-                outputPath = srtFile.absolutePath
-            )
-            if (ocrResult.isSuccess && srtFile.exists() && srtFile.length() > 0) {
-                val content = srtFile.readText()
-                val entries = subtitleParser.parseSrt(content)
-                if (entries.isNotEmpty()) {
-                    val count = saveSentences(videoId, entries)
-                    Log.i(TAG, "OCR 硬字幕识别成功: $count 句")
-                    return SubtitleAcquireResult(
-                        subtitlePath = srtFile.absolutePath,
-                        sentenceCount = count,
-                        source = SubtitleSource.OCR_HARDCODED
-                    )
-                }
-            } else {
-                Log.i(TAG, "OCR 未能识别到硬字幕（可能是视频无硬字幕或字幕不在画面底部）")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "OCR 硬字幕识别失败: ${e.message}")
-        }
-
-        // ---- 第4步：ASR 生成 ----
+        // ---- 第3步：Vosk ASR 生成 ----
         Log.i(TAG, "尝试 ASR 生成字幕")
         try {
             val asrResult = tryGenerateAsrSubtitle(videoFile, subtitleDir)
@@ -906,59 +878,6 @@ class VideoImportService @Inject constructor(
      * @param subtitleUri SAF 字幕文件 URI
      * @return 更新后的视频实体
      */
-    suspend fun reUploadSubtitle(videoId: Long, subtitleUri: Uri): Result<ShadowingVideoEntity> {
-        return try {
-            val video = shadowingVideoDao.getById(videoId)
-                ?: return Result.failure(VideoImportException.SubtitleParseException("视频不存在: $videoId"))
-
-            // 确定字幕文件存储路径（放在视频同级目录）
-            val videoFile = File(video.filePath)
-            val videoDir = videoFile.parentFile
-                ?: return Result.failure(VideoImportException.SubtitleParseException("无法获取视频所在目录"))
-
-            // 从 URI 判断扩展名
-            val subExt = when {
-                subtitleUri.toString().endsWith(".vtt", ignoreCase = true) -> "vtt"
-                else -> "srt"
-            }
-            val subFile = File(videoDir, "${videoFile.nameWithoutExtension}_manual.$subExt")
-
-            // 复制字幕文件
-            context.contentResolver.openInputStream(subtitleUri)?.use { input ->
-                FileOutputStream(subFile).use { output ->
-                    input.copyTo(output)
-                }
-            } ?: return Result.failure(VideoImportException.FileCopyException("无法读取字幕URI: $subtitleUri"))
-
-            // 解析字幕
-            val content = subFile.readText()
-            val entries = subtitleParser.detectAndParse(content, subFile.name)
-            if (entries.isEmpty()) {
-                subFile.delete()
-                return Result.failure(VideoImportException.SubtitleParseException("字幕文件解析失败，未找到有效字幕条目"))
-            }
-
-            // 删除旧的句子数据
-            shadowingSentenceDao.deleteByVideoId(videoId)
-
-            // 保存新的句子
-            val count = saveSentences(videoId, entries)
-
-            // 更新视频记录
-            shadowingVideoDao.updateSubtitlePath(videoId, subFile.absolutePath)
-            shadowingVideoDao.updateSentenceCount(videoId, count)
-
-            Log.i(TAG, "字幕重新上传成功: $count 句, 路径=${subFile.absolutePath}")
-            Result.success(shadowingVideoDao.getById(videoId) ?: video)
-        } catch (e: IOException) {
-            Result.failure(VideoImportException.FileCopyException("字幕文件复制失败: ${e.message}", e))
-        } catch (e: SecurityException) {
-            Result.failure(VideoImportException.FileCopyException("权限不足: ${e.message}", e))
-        } catch (e: Exception) {
-            Result.failure(VideoImportException.SubtitleParseException("字幕处理失败: ${e.message}", e))
-        }
-    }
-
     // ==================== 内部工具方法 ====================
 
     /**

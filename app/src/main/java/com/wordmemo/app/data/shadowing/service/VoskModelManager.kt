@@ -5,8 +5,6 @@ import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -14,27 +12,18 @@ import javax.inject.Singleton
 /**
  * Vosk 离线语音识别模型管理器。
  *
- * 负责管理 Vosk 识别模型的下载、解压、就绪检查。
+ * 模型文件打包在 APK assets 中（vosk-model-small-en-us-0.15.zip, ~40MB），
+ * 安装后从 assets 解压到 filesDir，零网络依赖。
  *
  * ## 模型来源
- * 由于 Vosk 模型（~40MB）过大无法内置到 APK assets 中，采用**首次运行自动下载**策略：
- * - 下载地址：https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
- * - 模型大小：约 40MB
- * - 存储路径：`context.filesDir/vosk/models/vosk-model-small-en-us-0.15/`
- * - 下载标记：`context.filesDir/vosk/.downloaded` 记录完成状态（断点续传安全标记）
+ * - vosk-model-small-en-us-0.15.zip（~40MB）
+ * - 路径：assets/vosk-model-small-en-us-0.15.zip
+ * - 首次启动自动解压到 `context.filesDir/vosk/models/vosk-model-small-en-us-0.15/`
  *
  * ## 生命周期
  * 1. [ensureModelReady] 检查模型是否存在
- * 2. 若不存在 → 自动下载并解压到模型目录
- * 3. [getModelPath] 返回模型目录路径（供 Vosk Model 构造器使用）
- *
- * ## 线程安全
- * 外部调用应使用 [Dispatchers.IO]，内部操作均同步。
- *
- * ## 约束
- * - 首次运行需要网络（后续全离线）
- * - 模型一旦下载不会自动删除
- * - 模型目录结构: vosk/models/vosk-model-small-en-us-0.15/am/, conf/, graph/, ...
+ * 2. 若不存在 → 从 assets 解压
+ * 3. [getModelPath] 返回模型目录路径
  */
 @Singleton
 class VoskModelManager @Inject constructor(
@@ -43,29 +32,24 @@ class VoskModelManager @Inject constructor(
     private val TAG = "VoskModelManager"
 
     companion object {
-        /** 模型存储根目录 */
+        /** 模型在 assets 中的 ZIP 文件名 */
+        private const val ASSETS_ZIP_NAME = "vosk-model-small-en-us-0.15.zip"
+
+        /** 模型解压后根目录 */
         private const val MODELS_ROOT = "vosk/models"
 
-        /** 推荐的小型英语模型名称 */
+        /** 模型名称 */
         const val MODEL_NAME = "vosk-model-small-en-us-0.15"
 
-        /** HuggingFace 镜像下载地址（更稳定） */
-        private const val MODEL_DOWNLOAD_URL =
-            "https://huggingface.co/alphacep/vosk-model-small-en-us-0.15/resolve/main/vosk-model-small-en-us-0.15.zip"
-
-        /** 回退下载地址（alphacephei.com 官方） */
-        private const val FALLBACK_DOWNLOAD_URL =
-            "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
-
-        /** 下载标记文件名 */
-        private const val DOWNLOAD_MARKER = ".downloaded"
+        /** 解压完成标记文件名 */
+        private const val EXTRACT_MARKER = ".extracted"
     }
 
     /** 模型目录路径 */
     private val modelDir: File
         get() = File(context.filesDir, "$MODELS_ROOT/$MODEL_NAME")
 
-    /** 模型是否已就绪（内存缓存，避免重复检查） */
+    /** 模型是否已就绪（内存缓存） */
     @Volatile
     private var _ready: Boolean = false
 
@@ -73,60 +57,50 @@ class VoskModelManager @Inject constructor(
 
     /**
      * 确保模型已就绪。
-     *
-     * 如果模型已存在且已验证，返回 true。
-     * 如果模型不存在，自动从 HuggingFace 下载并解压。
-     *
-     * @return true 如果模型已就绪，false 如果下载失败
+     * 如果模型已解压且验证通过，直接返回 true。
+     * 如果模型未解压，从 assets ZIP 解压。
      */
     fun ensureModelReady(): Boolean {
         if (_ready && modelDir.exists() && modelDir.listFiles()?.isNotEmpty() == true) {
             return true
         }
 
-        // 检查模型目录是否已完整
         if (isModelValid()) {
             _ready = true
             Log.i(TAG, "Vosk 模型已就绪: ${modelDir.absolutePath}")
             return true
         }
 
-        // 需要下载
+        // 从 assets 解压
         return try {
-            downloadAndExtract()
+            extractFromAssets()
             _ready = isModelValid()
             if (_ready) {
-                Log.i(TAG, "Vosk 模型下载并解压成功")
+                Log.i(TAG, "Vosk 模型从 assets 解压成功")
             } else {
-                Log.e(TAG, "Vosk 模型下载后验证失败")
+                Log.e(TAG, "Vosk 模型解压后验证失败")
             }
             _ready
         } catch (e: Exception) {
-            Log.e(TAG, "Vosk 模型准备失败: ${e.message}", e)
+            Log.e(TAG, "Vosk 模型解压失败: ${e.message}", e)
             _ready = false
             false
         }
     }
 
     /**
-     * 返回 Vosk 模型路径（不含尾部斜杠）。
-     *
-     * 调用前应确保 [ensureModelReady] 已成功。
-     *
-     * @return 模型目录的绝对路径
+     * 返回 Vosk 模型路径。
      * @throws IllegalStateException 如果模型尚未就绪
      */
     fun getModelPath(): String {
         if (!_ready && !isModelValid()) {
-            throw IllegalStateException(
-                "Vosk 模型未就绪。请先调用 ensureModelReady() 或检查模型是否已下载。"
-            )
+            throw IllegalStateException("Vosk 模型未就绪。请先调用 ensureModelReady()。")
         }
         return modelDir.absolutePath
     }
 
     /**
-     * 重置就绪状态（当需要重新下载时调用）。
+     * 重置就绪状态。
      */
     fun reset() {
         _ready = false
@@ -134,93 +108,35 @@ class VoskModelManager @Inject constructor(
 
     // ==================== 内部方法 ====================
 
-    /**
-     * 校验模型是否完整有效。
-     */
+    /** 校验模型目录是否完整 */
     private fun isModelValid(): Boolean {
-        if (!modelDir.exists()) return false
-        if (!modelDir.isDirectory) return false
-
-        // 检查关键子目录是否存在
+        if (!modelDir.exists() || !modelDir.isDirectory) return false
         val requiredPaths = listOf(
             "am/final.mdl",
             "conf/mfcc.conf",
             "graph/HCLG.fst",
             "graph/words.txt"
         )
-        return requiredPaths.all { relPath ->
-            File(modelDir, relPath).exists()
-        }
+        return requiredPaths.all { relPath -> File(modelDir, relPath).exists() }
     }
 
     /**
-     * 下载并解压 Vosk 模型 ZIP 文件。
-     *
-     * 流程:
-     * 1. 创建临时下载文件
-     * 2. 从 HuggingFace 或回退地址下载
-     * 3. 校验下载完成
-     * 4. 解压 ZIP 到模型目录
-     * 5. 创建下载标记文件
-     * 6. 清理临时文件
+     * 从 assets ZIP 解压模型到 filesDir。
+     * ZIP 包名 vosk-model-small-en-us-0.15.zip 解压后目录结构保持。
      */
-    private fun downloadAndExtract() {
+    private fun extractFromAssets() {
         val modelsRoot = File(context.filesDir, MODELS_ROOT)
         modelsRoot.mkdirs()
 
-        // 清理旧的模型目录（如果有不完整的下载）
+        // 清理旧的（可能不完整的）模型目录
         if (modelDir.exists()) {
             modelDir.deleteRecursively()
         }
 
-        // 尝试主下载地址，失败则回退
-        var downloaded = false
-        val exceptions = mutableListOf<Exception>()
+        Log.i(TAG, "从 assets 解压 Vosk 模型...")
+        val startTime = System.currentTimeMillis()
 
-        for (url in listOf(MODEL_DOWNLOAD_URL, FALLBACK_DOWNLOAD_URL)) {
-            if (downloaded) break
-            try {
-                downloadFromUrl(url)
-                downloaded = true
-            } catch (e: Exception) {
-                Log.w(TAG, "从 $url 下载失败: ${e.message}")
-                exceptions.add(e)
-            }
-        }
-
-        if (!downloaded) {
-            throw RuntimeException(
-                "Vosk 模型下载失败，已尝试所有下载源: ${exceptions.joinToString("; ") { it.message ?: "未知错误" }}"
-            )
-        }
-
-        if (!isModelValid()) {
-            throw RuntimeException("Vosk 模型下载后解压结果不完整")
-        }
-    }
-
-    /**
-     * 从指定 URL 下载 ZIP 并解压到模型目录。
-     */
-    private fun downloadFromUrl(downloadUrl: String) {
-        val modelsRoot = File(context.filesDir, MODELS_ROOT)
-        modelsRoot.mkdirs()
-
-        Log.i(TAG, "开始下载 Vosk 模型: $downloadUrl")
-
-        val connection = URL(downloadUrl).openConnection() as HttpURLConnection
-        connection.apply {
-            connectTimeout = 30_000
-            readTimeout = 120_000
-            setRequestProperty("User-Agent", "WordMemo/8.8")
-            instanceFollowRedirects = true
-        }
-
-        connection.connect()
-        val contentLength = connection.contentLengthLong
-        Log.i(TAG, "模型文件大小: ${contentLength / 1024 / 1024}MB")
-
-        connection.inputStream.use { input ->
+        context.assets.open(ASSETS_ZIP_NAME).use { input ->
             val zipStream = ZipInputStream(input)
             var entry = zipStream.nextEntry
             val buffer = ByteArray(8192)
@@ -235,7 +151,6 @@ class VoskModelManager @Inject constructor(
                             output.write(buffer, 0, bytesRead)
                         }
                     }
-                    // 设置可读权限
                     targetFile.setReadable(true, false)
                 }
                 zipStream.closeEntry()
@@ -243,11 +158,10 @@ class VoskModelManager @Inject constructor(
             }
         }
 
-        connection.disconnect()
+        val elapsed = System.currentTimeMillis() - startTime
+        Log.i(TAG, "Vosk 模型解压完成，耗时 ${elapsed}ms")
 
-        // 创建下载完成标记
-        File(modelsRoot, DOWNLOAD_MARKER).writeText(System.currentTimeMillis().toString())
-
-        Log.i(TAG, "Vosk 模型下载解压完成")
+        // 解压完成标记
+        File(modelsRoot, EXTRACT_MARKER).writeText(System.currentTimeMillis().toString())
     }
 }
