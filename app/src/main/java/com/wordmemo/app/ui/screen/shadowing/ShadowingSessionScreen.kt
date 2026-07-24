@@ -1,5 +1,7 @@
 package com.wordmemo.app.ui.screen.shadowing
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,10 +23,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -32,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -41,6 +48,12 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.wordmemo.app.domain.shadowing.model.ShadowingSentence
 import kotlinx.coroutines.delay
+
+// ==================== 颜色常量 ====================
+private val ColorOriginal = Color(0xFF4FC3F7)    // 浅蓝 — 原声波形
+private val ColorRecording = Color(0xFF81C784)   // 浅绿 — 录音波形
+private val ColorRecordingActive = Color(0xFFF44336) // 红色 — 录音中
+private val ColorPlaybackActive = Color(0xFFFFA726)  // 橙色 — 回放中
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,9 +71,7 @@ fun ShadowingSessionScreen(
     val subtitleFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let {
-            viewModel.reUploadSubtitle(it)
-        }
+        uri?.let { viewModel.reUploadSubtitle(it) }
     }
 
     // 加载指定视频的句子数据
@@ -108,13 +119,12 @@ fun ShadowingSessionScreen(
         exoPlayer.setPlaybackSpeed(uiState.playbackSpeed)
     }
 
-    // Sync seekTo position changes (from seekForward/seekBackward)
+    // Sync seekTo position changes
     LaunchedEffect(uiState.currentPositionMs) {
-        // Only seek if not triggered by a sentence change (pendingSeekToSentenceMs handles that)
         if (uiState.pendingSeekToSentenceMs < 0L) {
             val currentPlayerPos = exoPlayer.currentPosition
             val diff = kotlin.math.abs(uiState.currentPositionMs - currentPlayerPos)
-            if (diff > 500) { // If the diff is >500ms, it's a user-initiated seek, not a position update
+            if (diff > 500) {
                 exoPlayer.seekTo(uiState.currentPositionMs)
             }
         }
@@ -125,7 +135,7 @@ fun ShadowingSessionScreen(
         while (true) {
             val pos = exoPlayer.currentPosition
             viewModel.onPlaybackPositionChanged(pos)
-            delay(250) // Update every 250ms
+            delay(250)
         }
     }
 
@@ -134,18 +144,11 @@ fun ShadowingSessionScreen(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
-                    Player.STATE_READY -> { /* Player ready */ }
-                    Player.STATE_ENDED -> {
-                        viewModel.pauseVideo()
-                    }
-                    Player.STATE_BUFFERING -> { /* Buffering */ }
+                    Player.STATE_ENDED -> viewModel.pauseVideo()
+                    else -> {}
                 }
             }
-
-            override fun onPlayerError(error: PlaybackException) {
-                // Player error — handled silently
-            }
-
+            override fun onPlayerError(error: PlaybackException) {}
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (!isPlaying && uiState.isPlayingVideo) {
                     viewModel.pauseVideo()
@@ -153,19 +156,25 @@ fun ShadowingSessionScreen(
             }
         }
         exoPlayer.addListener(listener)
-        onDispose {
-            exoPlayer.removeListener(listener)
-        }
+        onDispose { exoPlayer.removeListener(listener) }
     }
 
     // Clean up ExoPlayer when leaving the screen
     DisposableEffect(Unit) {
-        onDispose {
-            exoPlayer.release()
+        onDispose { exoPlayer.release() }
+    }
+
+    // Error snackbar
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.pauseVideo()
         }
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -195,17 +204,15 @@ fun ShadowingSessionScreen(
     ) { padding ->
         if (uiState.isLoading) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
+            ) { CircularProgressIndicator() }
         } else if (uiState.sentences.isEmpty()) {
             EmptySentencesState(
                 subtitlePath = uiState.videoSubtitlePath,
-                onSelectSubtitleFile = { subtitleFilePickerLauncher.launch(arrayOf("text/*", "application/x-subrip", "application/x-srt", "*/*")) }
+                onSelectSubtitleFile = {
+                    subtitleFilePickerLauncher.launch(arrayOf("text/*", "application/x-subrip", "*/*"))
+                }
             )
         } else {
             Column(
@@ -235,34 +242,44 @@ fun ShadowingSessionScreen(
 
                 val currentSentence = uiState.sentences.getOrNull(uiState.currentSentenceIndex)
 
-                // === Sentence Display (25% of remaining space) ===
+                // === Sentence Display ===
                 SentenceDisplaySection(
                     currentIndex = uiState.currentSentenceIndex,
                     totalCount = uiState.sentences.size,
                     sentenceText = currentSentence?.text ?: "",
-                    modifier = Modifier.weight(0.20f)
+                    modifier = Modifier.weight(0.15f)
                 )
 
-                // === Recording Area (40% of remaining) ===
-                RecordingArea(
+                // === Dual Waveform Comparison ===
+                WaveformComparisonSection(
+                    hasRecording = uiState.hasRecording,
+                    recordedWaveform = uiState.recordedWaveform,
+                    isRecording = uiState.isRecording,
+                    recordingWaveform = uiState.waveformAmplitudes,
+                    isPlayingRecording = uiState.isPlayingRecording,
+                    recordingDurationMs = uiState.recordingDurationMs,
+                    modifier = Modifier.weight(0.25f)
+                )
+
+                // === Recording Controls ===
+                RecordingControlBar(
+                    hasPermission = uiState.hasMicrophonePermission,
                     recordingState = uiState.recordingState,
                     isRecording = uiState.isRecording,
                     hasRecording = uiState.hasRecording,
-                    waveformAmplitudes = uiState.waveformAmplitudes,
+                    isPlayingRecording = uiState.isPlayingRecording,
                     recordingDurationMs = uiState.recordingDurationMs,
                     onStartRecording = { viewModel.startRecording() },
                     onStopRecording = { viewModel.stopRecording() },
                     onPlayRecording = { viewModel.playRecording() },
-                    onDeleteRecording = { viewModel.deleteRecording() },
-                    modifier = Modifier.weight(0.35f)
+                    onDeleteRecording = { viewModel.deleteRecording() }
                 )
 
                 // === Playback Comparison ===
                 PlaybackComparisonSection(
                     hasRecording = uiState.hasRecording,
-                    recordingState = uiState.recordingState,
                     activeAudioSource = uiState.activeAudioSource,
-                    recordingDurationMs = uiState.recordingDurationMs,
+                    isPlayingRecording = uiState.isPlayingRecording,
                     onPlayOriginal = { viewModel.playOriginalSentence() },
                     onPlayUserRecording = { viewModel.playUserRecording() },
                     onSwitchAudioSource = { viewModel.switchAudioSource(it) }
@@ -299,51 +316,10 @@ fun ShadowingSessionScreen(
 
     // Speed picker dialog
     if (showSpeedPicker) {
-        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-        AlertDialog(
-            onDismissRequest = { showSpeedPicker = false },
-            shape = MaterialTheme.shapes.large,
-            title = {
-                Text("播放速度", style = MaterialTheme.typography.titleMedium)
-            },
-            text = {
-                Column {
-                    speeds.forEach { speed ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    viewModel.setPlaybackSpeed(speed)
-                                    showSpeedPicker = false
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "${speed}x",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (uiState.playbackSpeed == speed)
-                                    MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurface
-                            )
-                            if (uiState.playbackSpeed == speed) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showSpeedPicker = false }) {
-                    Text("取消")
-                }
-            }
+        SpeedPickerDialog(
+            currentSpeed = uiState.playbackSpeed,
+            onSelect = { viewModel.setPlaybackSpeed(it) },
+            onDismiss = { showSpeedPicker = false }
         )
     }
 }
@@ -356,9 +332,7 @@ private fun EmptySentencesState(
     onSelectSubtitleFile: () -> Unit
 ) {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -371,130 +345,27 @@ private fun EmptySentencesState(
                 modifier = Modifier.size(64.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
             )
-
             Text(
                 text = "暂无句子数据",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
-
-            if (subtitlePath == null) {
-                // 无字幕文件 → 提示用户原因和解决方式
-                Text(
-                    text = "此视频没有可用的字幕内容。\n" +
-                            "可能的原因：",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            Text(
+                text = "请选择字幕文件或导入带内嵌字幕的视频",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            FilledTonalButton(
+                onClick = onSelectSubtitleFile,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                 )
-
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ReasonRow(icon = Icons.Default.VideoFile, text = "视频文件本身未包含内嵌字幕轨道")
-                    ReasonRow(icon = Icons.Default.Settings, text = "未配置语音识别（Whisper API），无法自动生成字幕")
-                }
-
-                Text(
-                    text = "请通过以下方式获取字幕：",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    StepRow(number = "①", text = "点击下方按钮，选择已有 .srt / .vtt 字幕文件")
-                    StepRow(
-                        number = "②",
-                        text = "或在设置页配置 Whisper API 密钥后重新导入视频" +
-                                "\n（自动生成字幕）"
-                    )
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                // 选择字幕文件按钮
-                FilledTonalButton(
-                    onClick = onSelectSubtitleFile,
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                    )
-                ) {
-                    Icon(
-                        Icons.Default.UploadFile,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("选择字幕文件")
-                }
-            } else {
-                // 有 subtitlePath 但句子数为 0（字幕解析中 / 异常）
-                Text(
-                    text = "字幕文件存在但解析未能提取到有效句子，\n" +
-                            "请尝试重新选择字幕文件。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                OutlinedButton(onClick = onSelectSubtitleFile) {
-                    Icon(
-                        Icons.Default.UploadFile,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("重新选择字幕文件")
-                }
+            ) {
+                Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("选择字幕文件")
             }
         }
-    }
-}
-
-@Composable
-private fun ReasonRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    text: String
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-        )
-    }
-}
-
-@Composable
-private fun StepRow(number: String, text: String) {
-    Row(
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Text(
-            text = number,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 
@@ -517,12 +388,11 @@ private fun VideoPlayerSection(
             .aspectRatio(16f / 9f)
             .background(Color.Black)
     ) {
-        // ExoPlayer surface
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exoPlayer
-                    useController = false // We use custom controls
+                    useController = false
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setBackgroundColor(android.graphics.Color.BLACK)
                 }
@@ -530,7 +400,6 @@ private fun VideoPlayerSection(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Play overlay (shown when paused)
         if (!isPlaying) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -545,11 +414,8 @@ private fun VideoPlayerSection(
             }
         }
 
-        // Playback speed chip (top-right)
         Surface(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp),
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             shape = RoundedCornerShape(16.dp),
             color = Color.Black.copy(alpha = 0.6f),
             onClick = onShowSpeedPicker
@@ -562,28 +428,18 @@ private fun VideoPlayerSection(
             )
         }
 
-        // Current sentence text overlay (bottom-center)
         if (currentSentenceText.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(horizontal = 24.dp, vertical = 16.dp)
-                    .background(
-                        Color.Black.copy(alpha = 0.5f),
-                        RoundedCornerShape(8.dp)
-                    )
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = currentSentenceText,
                     style = MaterialTheme.typography.titleMedium.merge(
-                        TextStyle(
-                            shadow = Shadow(
-                                color = Color.Black.copy(alpha = 0.8f),
-                                offset = Offset(1f, 1f),
-                                blurRadius = 3f
-                            )
-                        )
+                        TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(1f, 1f), 3f))
                     ),
                     color = Color.White,
                     textAlign = TextAlign.Center
@@ -593,32 +449,17 @@ private fun VideoPlayerSection(
 
         // Touch controls overlay
         Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Backward 10s
-            IconButton(
-                onClick = onSeekBackward,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    Icons.Default.Replay10,
-                    contentDescription = "后退10秒",
-                    tint = Color.White.copy(alpha = 0.7f),
-                    modifier = Modifier.size(32.dp)
-                )
+            IconButton(onClick = onSeekBackward, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Default.Replay10, contentDescription = "后退10秒", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
             }
-
-            // Play/Pause
             FilledIconButton(
                 onClick = onTogglePlayPause,
                 modifier = Modifier.size(56.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
+                colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -626,18 +467,8 @@ private fun VideoPlayerSection(
                     modifier = Modifier.size(32.dp)
                 )
             }
-
-            // Forward 10s
-            IconButton(
-                onClick = onSeekForward,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    Icons.Default.Forward10,
-                    contentDescription = "前进10秒",
-                    tint = Color.White.copy(alpha = 0.7f),
-                    modifier = Modifier.size(32.dp)
-                )
+            IconButton(onClick = onSeekForward, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Default.Forward10, contentDescription = "前进10秒", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
             }
         }
     }
@@ -652,9 +483,7 @@ private fun SeekBarRow(
     onSeek: (Long) -> Unit
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -665,9 +494,7 @@ private fun SeekBarRow(
         )
         Slider(
             value = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs) else 0f,
-            onValueChange = { fraction ->
-                onSeek((fraction * durationMs).toLong())
-            },
+            onValueChange = { fraction -> onSeek((fraction * durationMs).toLong()) },
             modifier = Modifier.weight(1f),
             colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
@@ -692,14 +519,12 @@ private fun SentenceDisplaySection(
     modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
                 text = "第 ${currentIndex + 1} / $totalCount 句",
@@ -716,190 +541,299 @@ private fun SentenceDisplaySection(
     }
 }
 
-// ==================== Recording Area ====================
+// ==================== Dual Waveform Comparison ====================
 
 @Composable
-private fun RecordingArea(
-    recordingState: RecordingState,
-    isRecording: Boolean,
+private fun WaveformComparisonSection(
     hasRecording: Boolean,
-    waveformAmplitudes: List<Float>,
+    recordedWaveform: List<Float>,
+    isRecording: Boolean,
+    recordingWaveform: List<Float>,
+    isPlayingRecording: Boolean,
     recordingDurationMs: Long,
-    onStartRecording: () -> Unit,
-    onStopRecording: () -> Unit,
-    onPlayRecording: () -> Unit,
-    onDeleteRecording: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = if (isRecording) 1.15f else 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = EaseInOutCubic),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-
-    val buttonColor by animateColorAsState(
-        targetValue = when {
-            isRecording -> Color(0xFFF44336)
-            hasRecording -> Color(0xFF4CAF50)
-            else -> MaterialTheme.colorScheme.primary
-        },
-        label = "buttonColor"
-    )
-
-    val statusText = when {
-        isRecording -> "录音中..."
-        hasRecording -> "回放中"
-        else -> "点击录音，朗读上方句子"
-    }
-
-    Box(
-        modifier = modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center
+    Column(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.SpaceEvenly
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Pulse ring animation when recording
-            Box(
-                contentAlignment = Alignment.Center
-            ) {
-                if (isRecording) {
-                    val ringAlpha by infiniteTransition.animateFloat(
-                        initialValue = 0.3f,
-                        targetValue = 0f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(1200, easing = EaseOutCubic),
-                            repeatMode = RepeatMode.Restart
-                        ),
-                        label = "ringAlpha"
-                    )
-                    val ringScale by infiniteTransition.animateFloat(
-                        initialValue = 1f,
-                        targetValue = 1.5f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(1200, easing = EaseOutCubic),
-                            repeatMode = RepeatMode.Restart
-                        ),
-                        label = "ringScale"
-                    )
-                    Canvas(modifier = Modifier.size(120.dp)) {
-                        val cx = size.width / 2
-                        val cy = size.height / 2
-                        val radius = 36.dp.toPx() * ringScale
-                        drawCircle(
-                            color = Color(0xFFF44336).copy(alpha = ringAlpha),
-                            radius = radius,
-                            center = Offset(cx, cy),
-                            style = Stroke(width = 3.dp.toPx())
-                        )
-                    }
-                }
+        // 原声波形占位提示（当前通过 ExoPlayer 播放视频，暂不显示实时FFT）
+        // 后续可加 Visualizer API 实时波形
 
-                // Recording button
-                IconButton(
-                    onClick = {
-                        when {
-                            isRecording -> onStopRecording()
-                            hasRecording -> onPlayRecording()
-                            else -> onStartRecording()
-                        }
-                    },
-                    modifier = Modifier
-                        .size(88.dp)
-                        .clip(CircleShape)
-                        .background(buttonColor),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = Color.White
-                    )
-                ) {
-                    Icon(
-                        imageVector = when {
-                            isRecording -> Icons.Default.Stop
-                            hasRecording -> Icons.Default.PlayArrow
-                            else -> Icons.Default.Mic
-                        },
-                        contentDescription = if (isRecording) "停止录音" else "开始录音",
-                        modifier = Modifier.size(40.dp)
-                    )
-                }
+        // 录音波形（录制中实时 / 已完成固定）
+        if (isRecording) {
+            // 录制中：实时振幅条
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    Icons.Default.Mic,
+                    contentDescription = null,
+                    tint = ColorRecordingActive,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "录音中",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ColorRecordingActive,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = formatTimer(recordingDurationMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ColorRecordingActive
+                )
             }
-
-            // Status text & recording timer
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+            Spacer(Modifier.height(4.dp))
+            LiveWaveformBars(
+                amplitudes = recordingWaveform,
+                color = ColorRecordingActive,
+                modifier = Modifier.fillMaxWidth().height(40.dp)
+            )
+        } else if (hasRecording && recordedWaveform.isNotEmpty()) {
+            // 已有录音：显示固定波形
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (isRecording) {
+                Icon(
+                    Icons.Default.Equalizer,
+                    contentDescription = null,
+                    tint = if (isPlayingRecording) ColorPlaybackActive else ColorRecording,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = if (isPlayingRecording) "正在播放录音" else "录音波形",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isPlayingRecording) ColorPlaybackActive else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.weight(1f))
+                if (isPlayingRecording) {
                     Text(
                         text = formatTimer(recordingDurationMs),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFFF44336),
-                        fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ColorPlaybackActive
                     )
                 }
+            }
+            Spacer(Modifier.height(4.dp))
+            RecordedWaveformView(
+                amplitudes = recordedWaveform,
+                color = if (isPlayingRecording) ColorPlaybackActive else ColorRecording,
+                modifier = Modifier.fillMaxWidth().height(40.dp)
+            )
+
+            // 录音+原声双波形对比（简化：仅显示录音波形，原声波形后续通过 Visualizer 加）
+            Text(
+                text = "提示：点击下方「原文」播放原声，点击「我的录音」播放录音，对比发音差异",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        } else {
+            // 无录音时：显示操作提示
+            Box(
+                modifier = Modifier.fillMaxWidth().height(40.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
-                    text = statusText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "点击下方麦克风按钮开始录音",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                 )
-            }
-
-            // Waveform visualization
-            if (isRecording && waveformAmplitudes.isNotEmpty()) {
-                WaveformView(
-                    amplitudes = waveformAmplitudes,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .padding(horizontal = 32.dp)
-                )
-            }
-
-            // Delete recording button
-            if (hasRecording && !isRecording) {
-                TextButton(
-                    onClick = onDeleteRecording,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("删除录音", style = MaterialTheme.typography.labelMedium)
-                }
             }
         }
     }
 }
 
+/**
+ * 实时波形条 — 录音中显示不断滚动的振幅条。
+ */
 @Composable
-private fun WaveformView(
+private fun LiveWaveformBars(
     amplitudes: List<Float>,
+    color: Color,
     modifier: Modifier = Modifier
 ) {
-    val primaryColor = MaterialTheme.colorScheme.primary
     Canvas(modifier = modifier) {
-        val barWidth = size.width / amplitudes.size
-        val maxHeight = size.height * 0.9f
+        val barWidth = size.width / amplitudes.size.coerceAtLeast(1)
         val midY = size.height / 2
+        val maxHeight = size.height * 0.9f
 
-        amplitudes.forEachIndexed { index, amplitude ->
-            val barHeight = maxHeight * amplitude.coerceIn(0.05f, 1f)
-            val x = index * barWidth + barWidth * 0.15f
-            val barW = barWidth * 0.7f
+        amplitudes.forEachIndexed { index, amp ->
+            val barHeight = maxHeight * amp.coerceIn(0.02f, 1f)
+            val x = index * barWidth + 2f
+            val w = (barWidth - 4f).coerceAtLeast(1f)
 
-            drawRect(
-                color = primaryColor,
-                topLeft = Offset(x, midY - barHeight / 2),
-                size = androidx.compose.ui.geometry.Size(barW, barHeight)
+            // 从底部向上生长
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(x, size.height - barHeight),
+                size = Size(w, barHeight),
+                cornerRadius = CornerRadius(2f, 2f)
             )
         }
+    }
+}
+
+/**
+ * 已录制的固定波形 — 显示完整的录音振幅轮廓。
+ */
+@Composable
+private fun RecordedWaveformView(
+    amplitudes: List<Float>,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val barWidth = size.width / amplitudes.size.coerceAtLeast(1)
+        val midY = size.height / 2
+        val maxHeight = size.height * 0.85f
+
+        amplitudes.forEachIndexed { index, amp ->
+            val barHeight = maxHeight * amp.coerceIn(0.02f, 1f)
+            val x = index * barWidth + 1f
+            val w = (barWidth - 2f).coerceAtLeast(1f)
+
+            // 居中对称波形
+            drawRoundRect(
+                color = color.copy(alpha = 0.8f),
+                topLeft = Offset(x, midY - barHeight / 2),
+                size = Size(w, barHeight),
+                cornerRadius = CornerRadius(1f, 1f)
+            )
+        }
+    }
+}
+
+// ==================== Recording Controls ====================
+
+@Composable
+private fun RecordingControlBar(
+    hasPermission: Boolean,
+    recordingState: RecordingState,
+    isRecording: Boolean,
+    hasRecording: Boolean,
+    isPlayingRecording: Boolean,
+    recordingDurationMs: Long,
+    onStartRecording: () -> Unit,
+    onStopRecording: () -> Unit,
+    onPlayRecording: () -> Unit,
+    onDeleteRecording: () -> Unit
+) {
+    val buttonColor by animateColorAsState(
+        targetValue = when {
+            isRecording -> ColorRecordingActive
+            hasRecording -> ColorRecording
+            else -> MaterialTheme.colorScheme.primary
+        },
+        label = "recBtnColor"
+    )
+
+    val statusText = when {
+        !hasPermission -> "需要麦克风权限"
+        isRecording -> "点击停止"
+        hasRecording && isPlayingRecording -> "正在播放"
+        hasRecording -> "已录音，点击回放"
+        else -> "朗读上方句子"
+    }
+
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            // 删除按钮
+            if (hasRecording && !isRecording) {
+                IconButton(
+                    onClick = onDeleteRecording,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除录音",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            } else {
+                Spacer(Modifier.size(36.dp))
+            }
+
+            // 录音/回放主按钮
+            Box(contentAlignment = Alignment.Center) {
+                if (isRecording) {
+                    // 脉冲光环
+                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                    val ringAlpha by infiniteTransition.animateFloat(
+                        initialValue = 0.4f, targetValue = 0f,
+                        animationSpec = infiniteRepeatable(tween(1200, easing = EaseOutCubic), RepeatMode.Restart),
+                        label = "ringAlpha"
+                    )
+                    val ringScale by infiniteTransition.animateFloat(
+                        initialValue = 1f, targetValue = 1.6f,
+                        animationSpec = infiniteRepeatable(tween(1200, easing = EaseOutCubic), RepeatMode.Restart),
+                        label = "ringScale"
+                    )
+                    Canvas(modifier = Modifier.size(100.dp)) {
+                        drawCircle(
+                            color = ColorRecordingActive.copy(alpha = ringAlpha),
+                            radius = 28.dp.toPx() * ringScale,
+                            center = Offset(size.width / 2, size.height / 2),
+                            style = Stroke(width = 3.dp.toPx())
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = {
+                        when {
+                            isRecording -> onStopRecording()
+                            hasRecording && isPlayingRecording -> onPlayRecording() // 切换
+                            hasRecording -> onPlayRecording()
+                            else -> onStartRecording()
+                        }
+                    },
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(buttonColor),
+                    colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
+                ) {
+                    Icon(
+                        imageVector = when {
+                            isRecording -> Icons.Default.Stop
+                            isPlayingRecording -> Icons.Default.Pause
+                            hasRecording -> Icons.Default.PlayArrow
+                            else -> Icons.Default.Mic
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+
+            // 录音时长 / 占位
+            Text(
+                text = if (isRecording || hasRecording) formatTimer(recordingDurationMs) else "",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isRecording) ColorRecordingActive else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(48.dp)
+            )
+        }
+
+        // 状态文本
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = -16.dp)
+        )
     }
 }
 
@@ -909,19 +843,16 @@ private fun WaveformView(
 @Composable
 private fun PlaybackComparisonSection(
     hasRecording: Boolean,
-    recordingState: RecordingState,
     activeAudioSource: AudioSource,
-    recordingDurationMs: Long,
+    isPlayingRecording: Boolean,
     onPlayOriginal: () -> Unit,
     onPlayUserRecording: () -> Unit,
     onSwitchAudioSource: (AudioSource) -> Unit
 ) {
-    val showSection = hasRecording || recordingState == RecordingState.PLAYBACK
-
-    AnimatedVisibility(visible = showSection) {
+    AnimatedVisibility(visible = hasRecording) {
         Column(
-            modifier = Modifier.padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -936,14 +867,14 @@ private fun PlaybackComparisonSection(
 
                 SingleChoiceSegmentedButtonRow {
                     SegmentedButton(
-                        selected = activeAudioSource == AudioSource.ORIGINAL,
+                        selected = activeAudioSource == AudioSource.ORIGINAL && !isPlayingRecording,
                         onClick = { onSwitchAudioSource(AudioSource.ORIGINAL) },
                         shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                     ) {
                         Text("原文", style = MaterialTheme.typography.labelSmall)
                     }
                     SegmentedButton(
-                        selected = activeAudioSource == AudioSource.RECORDING,
+                        selected = activeAudioSource == AudioSource.RECORDING || isPlayingRecording,
                         onClick = { onSwitchAudioSource(AudioSource.RECORDING) },
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                     ) {
@@ -953,42 +884,46 @@ private fun PlaybackComparisonSection(
             }
 
             Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
             ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(32.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onPlayOriginal) {
+                // 播放原文 - 控制 ExoPlayer
+                AssistChip(
+                    onClick = onPlayOriginal,
+                    label = { Text("播放原文", style = MaterialTheme.typography.labelSmall) },
+                    leadingIcon = {
                         Icon(
                             Icons.Default.VolumeUp,
-                            contentDescription = "播放原声",
-                            tint = if (activeAudioSource == AudioSource.ORIGINAL)
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (activeAudioSource == AudioSource.ORIGINAL && !isPlayingRecording)
                                 MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = onPlayUserRecording) {
-                        Icon(
-                            Icons.Default.Mic,
-                            contentDescription = "播放录音",
-                            tint = if (activeAudioSource == AudioSource.RECORDING)
-                                MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                )
 
-                if (hasRecording) {
-                    Text(
-                        text = "最近录音: ${formatTimer(recordingDurationMs)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                // 播放录音
+                AssistChip(
+                    onClick = onPlayUserRecording,
+                    label = {
+                        Text(
+                            if (isPlayingRecording) "暂停" else "播放录音",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            if (isPlayingRecording) Icons.Default.Pause else Icons.Default.Mic,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (isPlayingRecording) ColorPlaybackActive
+                            else if (activeAudioSource == AudioSource.RECORDING) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                )
             }
         }
     }
@@ -1007,49 +942,26 @@ private fun SentenceNavigationRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp)
-            .padding(bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        OutlinedButton(
-            onClick = onPrevious,
-            enabled = currentIndex > 0,
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-        ) {
-            Icon(
-                Icons.Default.ChevronLeft,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(Modifier.width(4.dp))
-            Text("上一句")
+        IconButton(onClick = onPrevious, enabled = currentIndex > 0) {
+            Icon(Icons.Default.SkipPrevious, contentDescription = "上一句")
         }
-
-        Spacer(Modifier.weight(1f))
 
         IconButton(onClick = onShowList) {
-            Icon(
-                Icons.Default.List,
-                contentDescription = "句子列表",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Icon(Icons.Default.List, contentDescription = "句子列表")
         }
 
-        Spacer(Modifier.weight(1f))
+        Text(
+            text = "${currentIndex + 1} / $totalCount",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
-        OutlinedButton(
-            onClick = onNext,
-            enabled = currentIndex < totalCount - 1,
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-        ) {
-            Text("下一句")
-            Spacer(Modifier.width(4.dp))
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
+        IconButton(onClick = onNext, enabled = currentIndex < totalCount - 1) {
+            Icon(Icons.Default.SkipNext, contentDescription = "下一句")
         }
     }
 }
@@ -1062,83 +974,95 @@ private fun SentenceListSheet(
     currentIndex: Int,
     onJumpToSentence: (Int) -> Unit
 ) {
-    LazyColumn(
-        modifier = Modifier.padding(bottom = 32.dp)
-    ) {
-        itemsIndexed(sentences) { index, sentence ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onJumpToSentence(index) }
-                    .background(
-                        if (index == currentIndex)
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-                        else Color.Transparent
-                    )
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (index == currentIndex) {
-                    Box(
-                        modifier = Modifier
-                            .width(3.dp)
-                            .height(24.dp)
-                            .clip(RoundedCornerShape(1.5.dp))
-                            .background(MaterialTheme.colorScheme.primary)
-                    )
-                } else {
-                    Spacer(Modifier.width(3.dp))
-                }
-
-                Text(
-                    text = formatTimestamp(sentence.startTimeMs),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(56.dp)
-                )
-
-                Text(
-                    text = sentence.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (index == currentIndex)
-                        MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-
-                if (index <= currentIndex) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                    )
-                }
-            }
-            if (index < sentences.size - 1) {
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+    Column(modifier = Modifier.padding(bottom = 32.dp)) {
+        Text(
+            text = "句子列表",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+        )
+        LazyColumn {
+            itemsIndexed(sentences) { index, sentence ->
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            text = "${index + 1}. ${sentence.text}",
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    supportingContent = {
+                        Text(
+                            text = formatTimestamp(sentence.startTimeMs),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    colors = ListItemDefaults.colors(
+                        containerColor = if (index == currentIndex)
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        else MaterialTheme.colorScheme.surface
+                    ),
+                    modifier = Modifier.clickable { onJumpToSentence(index) }
                 )
             }
         }
     }
 }
 
-// ==================== Utility Functions ====================
+// ==================== Speed Picker Dialog ====================
 
-private fun formatTimer(ms: Long): String {
-    val totalSec = ms / 1000
-    val min = totalSec / 60
-    val sec = totalSec % 60
-    return "%02d:%02d".format(min, sec)
+@Composable
+private fun SpeedPickerDialog(
+    currentSpeed: Float,
+    onSelect: (Float) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = MaterialTheme.shapes.large,
+        title = { Text("播放速度", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column {
+                speeds.forEach { speed ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(speed) }
+                            .padding(vertical = 12.dp, horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "${speed}x",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (currentSpeed == speed) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                        if (currentSpeed == speed) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
+// ==================== Utility Functions ====================
+
 private fun formatTimestamp(ms: Long): String {
-    val totalSec = ms / 1000
-    val min = totalSec / 60
-    val sec = totalSec % 60
-    return "%d:%02d".format(min, sec)
+    if (ms < 0) return "0:00"
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "${minutes}:${seconds.toString().padStart(2, '0')}"
+}
+
+private fun formatTimer(ms: Long): String {
+    if (ms < 0) return "0:00"
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
 }
