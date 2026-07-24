@@ -803,7 +803,7 @@ class VideoImportService @Inject constructor(
                 Log.w(TAG, "音频提取失败，尝试 MP3 格式: ${audioResult.exceptionOrNull()?.message}")
             }
 
-            // ---- 第2优先：在线 Whisper API ----
+            // ---- 第2优先：在线 Whisper API（OpenRouter） ----
             val asrBaseUrl = try {
                 appConfigDao.getValue(SubtitleGenerator.CONFIG_ASR_BASE_URL)
                     ?.value?.ifBlank { null }
@@ -814,14 +814,21 @@ class VideoImportService @Inject constructor(
                     ?.value?.ifBlank { null }
             } catch (_: Exception) { null }
 
-            if (asrBaseUrl == null || asrApiKey == null) {
+            // 如果未配置 ASR 专用 Key，尝试使用通用 API Key（OpenRouter）
+            val effectiveKey = asrApiKey ?: run {
+                try {
+                    val cipher = com.wordmemo.app.data.encryption.ApiKeyCipher()
+                    appConfigDao.getValue("api_key")?.value?.let { cipher.decrypt(it) }
+                        ?.ifBlank { null }
+                } catch (_: Exception) { null }
+            }
+
+            val effectiveBaseUrl = asrBaseUrl ?: SubtitleGenerator.DEFAULT_ASR_BASE_URL
+
+            if (effectiveKey == null) {
                 return@withContext Result.failure(
                     VideoImportException.AsrConfigurationException(
-                        "离线 ASR 不可用且在线 ASR 未配置。\n" +
-                            "Vosk 模型尚未下载（需联网下载一次）或在线 ASR 未配置。\n" +
-                            "配置方式：确保网络连接以自动下载 Vosk 模型，" +
-                            "或在设置页配置 ASR 服务地址 + ASR API Key。\n" +
-                            "也可自行准备 .srt 字幕文件导入。"
+                        "在线 ASR 未配置。请在设置页填写 OpenRouter API Key，或在设置中配置 ASR 服务地址 + ASR API Key。"
                     )
                 )
             }
@@ -832,8 +839,8 @@ class VideoImportService @Inject constructor(
                 val whisperResult = subtitleGenerator.generateSubtitle(
                     audioPath = audioFile.absolutePath,
                     outputPath = srtFile.absolutePath,
-                    asrBaseUrl = asrBaseUrl,
-                    asrApiKey = asrApiKey
+                    asrBaseUrl = effectiveBaseUrl,
+                    asrApiKey = effectiveKey
                 )
                 if (whisperResult.isSuccess) {
                     return@withContext whisperResult
@@ -856,8 +863,8 @@ class VideoImportService @Inject constructor(
             subtitleGenerator.generateSubtitle(
                 audioPath = mp3File.absolutePath,
                 outputPath = srtFile.absolutePath,
-                asrBaseUrl = asrBaseUrl,
-                asrApiKey = asrApiKey
+                asrBaseUrl = effectiveBaseUrl,
+                asrApiKey = effectiveKey
             )
         }
     }

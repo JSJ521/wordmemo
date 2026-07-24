@@ -40,10 +40,10 @@ class SubtitleGenerator @Inject constructor() {
 
     /** ASR 配置键名（存入 AppConfig 表） */
     companion object {
-        /** ASR 服务器地址，默认 OpenAI */
+        /** ASR 服务器地址，默认 OpenRouter */
         const val CONFIG_ASR_BASE_URL = "asr_base_url"
-        /** OpenAI Whisper API 默认地址 */
-        const val DEFAULT_ASR_BASE_URL = "https://api.openai.com"
+        /** OpenAI Whisper API 默认地址（OpenRouter） */
+        const val DEFAULT_ASR_BASE_URL = "https://openrouter.ai/api"
 
         /** ASR API Key */
         const val CONFIG_ASR_API_KEY = "asr_api_key"
@@ -76,7 +76,7 @@ class SubtitleGenerator @Inject constructor() {
         outputPath: String,
         asrBaseUrl: String?,
         asrApiKey: String?,
-        model: String = "whisper-1",
+        model: String = "openai/whisper-1",
         language: String? = null
     ): Result<String> {
         // 0. 前置校验
