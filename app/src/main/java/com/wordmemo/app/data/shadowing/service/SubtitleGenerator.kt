@@ -104,12 +104,21 @@ class SubtitleGenerator @Inject constructor() {
         return try {
             val url = "${asrBaseUrl.trimEnd('/')}/v1/audio/transcriptions"
 
-            // 构建 multipart 请求体
-            val audioBody = audioFile.asRequestBody("audio/wav".toMediaType())
+            // 构建 multipart 请求体（根据扩展名选择 MIME 类型）
+            val mime = when {
+                audioFile.name.endsWith(".mp4", ignoreCase = true) -> "video/mp4"
+                audioFile.name.endsWith(".mkv", ignoreCase = true) -> "video/x-matroska"
+                audioFile.name.endsWith(".mov", ignoreCase = true) -> "video/quicktime"
+                audioFile.name.endsWith(".mp3", ignoreCase = true) -> "audio/mpeg"
+                audioFile.name.endsWith(".wav", ignoreCase = true) -> "audio/wav"
+                audioFile.name.endsWith(".webm", ignoreCase = true) -> "audio/webm"
+                else -> "audio/wav"
+            }
+            val audioBody = audioFile.asRequestBody(mime.toMediaType())
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("model", model)
-                .addFormDataPart("response_format", "srt")
+                .addFormDataPart("response_format", "verbose_json")
                 .addFormDataPart("file", audioFile.name, audioBody)
                 .apply {
                     if (!language.isNullOrBlank()) {

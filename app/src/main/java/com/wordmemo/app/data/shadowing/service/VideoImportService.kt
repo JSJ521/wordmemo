@@ -773,15 +773,15 @@ class VideoImportService @Inject constructor(
         subtitleDir: File
     ): Result<String> {
         return withContext(Dispatchers.IO) {
-            // ---- 第1优先：Vosk 离线识别 ----
             val audioFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_audio.wav")
+
+            // ---- 第1优先：Vosk 离线识别（需 WAV 音频） ----
             val audioResult = subtitleExtractor.extractAudio(
                 videoPath = videoFile.absolutePath,
                 outputPath = audioFile.absolutePath
             )
 
             if (audioResult.isSuccess && audioFile.exists() && audioFile.length() > 0) {
-                // 音频提取成功，尝试 Vosk 离线识别
                 val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_vosk.srt")
                 val voskResult = voskSubtitleGenerator.generateSubtitle(
                     audioWavPath = audioFile.absolutePath,
@@ -793,79 +793,45 @@ class VideoImportService @Inject constructor(
                     return@withContext Result.success(srtFile.absolutePath)
                 } else {
                     val err = voskResult.exceptionOrNull()
-                    if (err is VoskNotReadyException) {
-                        Log.w(TAG, "Vosk 模型未就绪（首次使用需联网下载），回退到在线 ASR: ${err.message}")
-                    } else {
-                        Log.w(TAG, "Vosk 识别失败，回退到在线 ASR: ${err?.message}")
-                    }
+                    Log.w(TAG, "Vosk 识别失败: ${err?.message}")
                 }
-            } else {
-                Log.w(TAG, "音频提取失败，尝试 MP3 格式: ${audioResult.exceptionOrNull()?.message}")
             }
 
-            // ---- 第2优先：在线 Whisper API（OpenRouter） ----
-            val asrBaseUrl = try {
-                appConfigDao.getValue(SubtitleGenerator.CONFIG_ASR_BASE_URL)
-                    ?.value?.ifBlank { null }
-            } catch (_: Exception) { null }
-
+            // ---- 第2优先：在线 Whisper API（OpenRouter）----
             val asrApiKey = try {
                 appConfigDao.getValue(SubtitleGenerator.CONFIG_ASR_API_KEY)
                     ?.value?.ifBlank { null }
             } catch (_: Exception) { null }
-
-            // 如果未配置 ASR 专用 Key，尝试使用通用 API Key（OpenRouter）
-            val effectiveKey = asrApiKey ?: run {
-                try {
-                    val cipher = com.wordmemo.app.data.encryption.ApiKeyCipher()
-                    appConfigDao.getValue("api_key")?.value?.let { cipher.decrypt(it) }
-                        ?.ifBlank { null }
-                } catch (_: Exception) { null }
-            }
-
-            val effectiveBaseUrl = asrBaseUrl ?: SubtitleGenerator.DEFAULT_ASR_BASE_URL
-
-            if (effectiveKey == null) {
+            if (asrApiKey == null) {
                 return@withContext Result.failure(
                     VideoImportException.AsrConfigurationException(
-                        "在线 ASR 未配置。请在设置页填写 OpenRouter API Key，或在设置中配置 ASR 服务地址 + ASR API Key。"
+                        "在线 ASR 未配置。请在设置页填写 ASR API Key。"
                     )
                 )
             }
+            val asrBaseUrl = try {
+                appConfigDao.getValue(SubtitleGenerator.CONFIG_ASR_BASE_URL)
+                    ?.value?.ifBlank { null }
+            } catch (_: Exception) { null }
+            val effectiveBaseUrl = asrBaseUrl ?: SubtitleGenerator.DEFAULT_ASR_BASE_URL
 
-            // 用 WAV 调用在线 Whisper API（如果 WAV 已存在且有效）
-            if (audioFile.exists() && audioFile.length() > 0) {
-                val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_asr.srt")
-                val whisperResult = subtitleGenerator.generateSubtitle(
-                    audioPath = audioFile.absolutePath,
-                    outputPath = srtFile.absolutePath,
-                    asrBaseUrl = effectiveBaseUrl,
-                    asrApiKey = effectiveKey
-                )
-                if (whisperResult.isSuccess) {
-                    return@withContext whisperResult
-                }
-            }
-
-            // 尝试 MP3 格式（在线 Whisper API 使用）
-            val mp3File = File(subtitleDir, "${videoFile.nameWithoutExtension}_audio.mp3")
-            val mp3Result = subtitleExtractor.extractAudio(
-                videoPath = videoFile.absolutePath,
-                outputPath = mp3File.absolutePath
-            )
-            if (mp3Result.isFailure) {
-                return@withContext Result.failure(
-                    IOException("音频提取失败: ${mp3Result.exceptionOrNull()?.message}")
-                )
-            }
-
+            // 直接将视频文件发给 Whisper API（支持 mp4/mkv/mov 等格式）
+            Log.i(TAG, "在线 Whisper 转录: ${videoFile.name}")
             val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_asr.srt")
-            subtitleGenerator.generateSubtitle(
-                audioPath = mp3File.absolutePath,
+            val whisperResult = subtitleGenerator.generateSubtitle(
+                audioPath = videoFile.absolutePath,
                 outputPath = srtFile.absolutePath,
                 asrBaseUrl = effectiveBaseUrl,
-                asrApiKey = effectiveKey
+                asrApiKey = asrApiKey
             )
+            if (whisperResult.isSuccess) {
+                Log.i(TAG, "在线 Whisper 转录成功: ${srtFile.absolutePath}")
+                return@withContext whisperResult
+            }
+
+            // ---- 全失败 ----
+            Log.w(TAG, "所有 ASR 方式均失败")
+            whisperResult
         }
     }
 
