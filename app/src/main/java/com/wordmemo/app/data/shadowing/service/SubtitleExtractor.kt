@@ -1,6 +1,8 @@
 package com.wordmemo.app.data.shadowing.service
 
 import android.content.Context
+import android.media.MediaCodec
+import android.media.MediaCodec.BufferInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Log
@@ -9,7 +11,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -198,18 +202,271 @@ class SubtitleExtractor @Inject constructor(
     }
 
     /**
-     * 提取视频音频（用于 ASR）。
-     * 注：此处仅返回视频路径，实际音频提取由 VoskSubtitleGenerator 内部处理。
+     * 提取视频音频为 16kHz 单声道 16-bit PCM WAV 文件（用于 Vosk ASR）。
+     *
+     * 用 Android 原生 MediaExtractor + MediaCodec 解码，
+     * 绕过 Android 10+ noexec 限制（旧版 FFmpeg ProcessBuilder 方案不可用）。
+     *
+     * 处理流程：
+     * 1. MediaExtractor 选择音频轨道
+     * 2. MediaCodec 解码为 PCM 16-bit shorts
+     * 3. 立体声 → 下混为单声道
+     * 4. 重采样至 16000Hz（线性插值）
+     * 5. 写标准 WAV 头（44 bytes）+ PCM 数据体
      */
+    @Suppress("InlinedApi")
     suspend fun extractAudio(videoPath: String, outputPath: String): Result<String> {
         return withContext(Dispatchers.IO) {
+            var extractor: MediaExtractor? = null
+            var decoder: MediaCodec? = null
             try {
                 File(outputPath).parentFile?.mkdirs()
-                // VoskSubtitleGenerator 内部会处理格式转换
-                Result.success(videoPath)
+
+                // ── 1. MediaExtractor 选择音频轨道 ──
+                extractor = MediaExtractor()
+                extractor.setDataSource(videoPath)
+
+                var audioTrackIdx = -1
+                var audioMime = ""
+                for (i in 0 until extractor.trackCount) {
+                    val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("audio/")) {
+                        audioTrackIdx = i
+                        audioMime = mime
+                        break
+                    }
+                }
+                if (audioTrackIdx < 0) {
+                    return@withContext Result.failure(
+                        IOException("视频中未找到音频轨道: $videoPath")
+                    )
+                }
+
+                extractor.selectTrack(audioTrackIdx)
+                Log.i(TAG, "选中音频轨道 #$audioTrackIdx: $audioMime")
+
+                // ── 2. MediaCodec 解码器 ──
+                decoder = MediaCodec.createDecoderByType(audioMime)
+                decoder.configure(extractor.getTrackFormat(audioTrackIdx), null, null, 0)
+                decoder.start()
+
+                val allFrames = mutableListOf<ShortArray>()
+                val bufferInfo = BufferInfo()
+                var outputFormat: MediaFormat? = null
+                var inputEOS = false
+                var outputEOS = false
+
+                while (!outputEOS) {
+                    // ── 2a. 喂入数据 ──
+                    if (!inputEOS) {
+                        val inputIdx = decoder.dequeueInputBuffer(10_000L)
+                        if (inputIdx >= 0) {
+                            val inputBuf = decoder.getInputBuffer(inputIdx)!!
+                            val sampleSize = extractor.readSampleData(inputBuf, 0)
+                            if (sampleSize < 0) {
+                                decoder.queueInputBuffer(
+                                    inputIdx, 0, 0, 0,
+                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                                )
+                                inputEOS = true
+                            } else {
+                                decoder.queueInputBuffer(
+                                    inputIdx, 0, sampleSize,
+                                    extractor.sampleTime, 0
+                                )
+                                extractor.advance()
+                            }
+                        }
+                    }
+
+                    // ── 2b. 取出输出 ──
+                    val outputIdx = decoder.dequeueOutputBuffer(bufferInfo, 10_000L)
+                    when {
+                        outputIdx >= 0 -> {
+                            if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                                outputEOS = true
+                            }
+                            if (bufferInfo.size > 0) {
+                                val outBuf = decoder.getOutputBuffer(outputIdx)!!
+                                outBuf.position(bufferInfo.offset)
+                                // 读取 PCM 16-bit shorts（绝大多数据解码器输出 16-bit PCM）
+                                val shortCount = bufferInfo.size / 2
+                                val shorts = ShortArray(shortCount)
+                                outBuf.order(ByteOrder.nativeOrder()).asShortBuffer().get(shorts)
+                                allFrames.add(shorts)
+                            }
+                            decoder.releaseOutputBuffer(outputIdx, false)
+                        }
+                        outputIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                            outputFormat = decoder.outputFormat
+                        }
+                        outputIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                            // 无可用输出，继续循环
+                        }
+                    }
+                }
+
+                decoder.stop()
+                decoder.release()
+                decoder = null
+                extractor.release()
+                extractor = null
+
+                if (allFrames.isEmpty()) {
+                    return@withContext Result.failure(IOException("未解码出音频数据"))
+                }
+
+                // ── 3. 拼接所有 PCM 帧 ──
+                val totalShorts = allFrames.sumOf { it.size }
+                val allSamples = ShortArray(totalShorts)
+                var writePos = 0
+                for (frame in allFrames) {
+                    System.arraycopy(frame, 0, allSamples, writePos, frame.size)
+                    writePos += frame.size
+                }
+
+                // ── 4. 获取原始格式信息 ──
+                val outFmt = outputFormat ?: run {
+                    return@withContext Result.failure(IOException("未获取到输出格式"))
+                }
+                val srcSampleRate = outFmt.getInteger(MediaFormat.KEY_SAMPLE_RATE, 44100)
+                val srcChannels = outFmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT, 1)
+
+                // ── 5. 转换为 16kHz 单声道并写 WAV ──
+                writeAudioAsWav(outputPath, allSamples, srcSampleRate, srcChannels)
+
+                if (File(outputPath).exists() && File(outputPath).length() > 44L) {
+                    Log.i(TAG, "音频提取成功: $outputPath " +
+                            "(${File(outputPath).length()} bytes, ${srcSampleRate}Hz/${srcChannels}ch " +
+                            "→ 16000Hz/1ch)")
+                    Result.success(outputPath)
+                } else {
+                    Result.failure(IOException("WAV 文件写入失败或为空"))
+                }
+
             } catch (e: Exception) {
+                Log.e(TAG, "音频提取异常: ${e.message}", e)
                 Result.failure(e)
+            } finally {
+                try { decoder?.stop() } catch (_: Exception) {}
+                try { decoder?.release() } catch (_: Exception) {}
+                try { extractor?.release() } catch (_: Exception) {}
             }
+        }
+    }
+
+    // ==================== 音频处理辅助方法 ====================
+
+    /**
+     * 将原始 PCM 数据转换为 16kHz 单声道 WAV 文件。
+     * 处理：立体声下混、重采样、WAV 头写入。
+     */
+    private fun writeAudioAsWav(
+        outputPath: String,
+        srcSamples: ShortArray,
+        srcSampleRate: Int,
+        srcChannels: Int
+    ) {
+        // 下混为单声道
+        val mono = if (srcChannels > 1) {
+            downmixToMono(srcSamples, srcChannels)
+        } else {
+            srcSamples
+        }
+
+        // 重采样至 16000Hz
+        val resampled = if (srcSampleRate != 16000) {
+            resampleTo16000(mono, srcSampleRate)
+        } else {
+            mono
+        }
+
+        // 写 WAV 文件
+        writeWavFile(outputPath, resampled, 16000)
+    }
+
+    /**
+     * 立体声/多声道 → 单声道下混。
+     * 对每帧各声道求和取平均值。
+     */
+    private fun downmixToMono(samples: ShortArray, channels: Int): ShortArray {
+        val frameCount = samples.size / channels
+        val mono = ShortArray(frameCount)
+        for (i in 0 until frameCount) {
+            var sum = 0
+            for (ch in 0 until channels) {
+                sum += samples[i * channels + ch].toInt()
+            }
+            mono[i] = (sum / channels).toShort()
+        }
+        return mono
+    }
+
+    /**
+     * 线性插值重采样至 16000Hz。
+     * 支持任意源采样率 → 16kHz。
+     */
+    private fun resampleTo16000(input: ShortArray, srcSampleRate: Int): ShortArray {
+        if (srcSampleRate == 16000) return input
+
+        val ratio = srcSampleRate.toDouble() / 16000.0
+        val outputLen = (input.size / ratio + 0.5).toInt().coerceAtLeast(1)
+        val output = ShortArray(outputLen)
+
+        for (i in 0 until outputLen) {
+            val srcPos = i * ratio
+            val srcIdx = srcPos.toInt()
+            val frac = srcPos - srcIdx
+
+            if (srcIdx + 1 < input.size) {
+                // 线性插值
+                val s0 = input[srcIdx].toInt() and 0xFFFF
+                val s1 = input[srcIdx + 1].toInt() and 0xFFFF
+                val interpolated = (s0 * (1.0 - frac) + s1 * frac + 0.5).toInt()
+                output[i] = (interpolated.coerceIn(0, 0xFFFF) - 32768).toShort()
+            } else if (srcIdx < input.size) {
+                output[i] = input[srcIdx]
+            }
+        }
+        return output
+    }
+
+    /**
+     * 写标准 44 字节 WAV 头 + 16-bit PCM 数据体。
+     * 格式: PCM, 单声道, 16-bit, 16000Hz (little-endian)。
+     */
+    private fun writeWavFile(path: String, samples: ShortArray, sampleRate: Int) {
+        val file = File(path).also { it.parentFile?.mkdirs() }
+        val dataSize = samples.size * 2       // 16-bit = 2 bytes/sample
+        val fileSize = 44 + dataSize
+
+        RandomAccessFile(file, "rw").use { raf ->
+            // RIFF header
+            raf.writeBytes("RIFF")
+            raf.writeInt(Integer.reverseBytes(fileSize - 8))
+            raf.writeBytes("WAVE")
+
+            // fmt chunk (16 bytes)
+            raf.writeBytes("fmt ")
+            raf.writeInt(Integer.reverseBytes(16))          // chunk size
+            raf.writeShort(Integer.reverseBytes(1) shr 16)   // PCM format (LE)
+            raf.writeShort(Integer.reverseBytes(1) shr 16)   // mono (LE)
+            raf.writeInt(Integer.reverseBytes(sampleRate))  // sample rate
+            raf.writeInt(Integer.reverseBytes(sampleRate * 2)) // byte rate
+            raf.writeShort(Integer.reverseBytes(2) shr 16)   // block align (LE)
+            raf.writeShort(Integer.reverseBytes(16) shr 16)  // bits per sample (LE)
+
+            // data chunk
+            raf.writeBytes("data")
+            raf.writeInt(Integer.reverseBytes(dataSize))
+
+            // PCM data (little-endian 16-bit signed)
+            val buf = ByteBuffer.allocate(dataSize)
+            buf.order(ByteOrder.LITTLE_ENDIAN)
+            for (s in samples) {
+                buf.putShort(s)
+            }
+            raf.write(buf.array())
         }
     }
 
