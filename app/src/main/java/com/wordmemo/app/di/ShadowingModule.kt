@@ -3,6 +3,7 @@ package com.wordmemo.app.di
 import com.wordmemo.app.data.shadowing.dao.ShadowingRecordDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingSentenceDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingVideoDao
+import com.wordmemo.app.data.shadowing.dao.ReadingProgressDao
 import com.wordmemo.app.data.local.WordMemoDatabase
 import dagger.Module
 import dagger.Provides
@@ -36,4 +37,9 @@ object ShadowingModule {
     @Singleton
     fun provideShadowingRecordDao(db: WordMemoDatabase): ShadowingRecordDao =
         db.shadowingRecordDao()
+
+    @Provides
+    @Singleton
+    fun provideReadingProgressDao(db: WordMemoDatabase): ReadingProgressDao =
+        db.readingProgressDao()
 }

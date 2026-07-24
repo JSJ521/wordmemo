@@ -35,6 +35,7 @@ fun WordListScreen(
     onNavigateToOcr: () -> Unit,
     onNavigateToShadowing: () -> Unit,
     onNavigateToAssessment: () -> Unit,
+    onNavigateToReading: () -> Unit,
     initialGroupId: Long? = null,
     viewModel: WordListViewModel = hiltViewModel()
 ) {
@@ -107,6 +108,10 @@ fun WordListScreen(
                             showUtilityMenu = false
                             onNavigateToAssessment()
                         }) { Icon(Icons.Default.RateReview, contentDescription = "发音测评") }
+                        IconButton(onClick = {
+                            showUtilityMenu = false
+                            onNavigateToReading()
+                        }) { Icon(Icons.Default.LibraryBooks, contentDescription = "EPUB精听") }
                     }
                 }
             }

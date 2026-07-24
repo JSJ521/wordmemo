@@ -20,9 +20,12 @@ import com.wordmemo.app.ui.screen.wordgraph.WordGraphScreen
 import com.wordmemo.app.ui.screen.wordlist.WordListScreen
 import com.wordmemo.app.ui.screen.shadowing.ShadowingHomeScreen
 import com.wordmemo.app.ui.screen.shadowing.ShadowingSessionScreen
+import com.wordmemo.app.ui.screen.shadowing.EpubShadowingScreen
 import com.wordmemo.app.ui.screen.pronunciation.AssessmentHomeScreen
 import com.wordmemo.app.ui.screen.pronunciation.AssessmentResultScreen
 import com.wordmemo.app.ui.screen.pronunciation.ProgressScreen
+import com.wordmemo.app.ui.screen.reading.ReadingBookListScreen
+import com.wordmemo.app.ui.screen.reading.ReadingScreen
 
 private val fadeSlideIn = slideInHorizontally(
     animationSpec = tween(280),
@@ -56,6 +59,7 @@ fun NavGraph(navController: NavHostController) {
                 onNavigateToOcr = { navController.navigate(Screen.Ocr.route) },
                 onNavigateToShadowing = { navController.navigate(Screen.ShadowingHome.route) },
                 onNavigateToAssessment = { navController.navigate(Screen.AssessmentHome.route) },
+                onNavigateToReading = { navController.navigate(Screen.ReadingBookList.route) },
                 initialGroupId = groupId
             )
         }
@@ -228,6 +232,47 @@ fun NavGraph(navController: NavHostController) {
             exitTransition = { fadeSlideOut }
         ) { ProgressScreen(
                 onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // EPUB 精听
+        composable(Screen.ReadingBookList.route,
+            enterTransition = { fadeSlideIn },
+            exitTransition = { fadeSlideOut }
+        ) { ReadingBookListScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToReading = {
+                    navController.navigate(Screen.ReadingPage.route)
+                }
+            )
+        }
+
+        composable(Screen.ReadingPage.route,
+            enterTransition = { fadeSlideIn },
+            exitTransition = { fadeSlideOut }
+        ) { ReadingScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToShadowing = { sentences ->
+                    EpubShadowingDataHolder.sentences = sentences
+                    navController.navigate(Screen.EpubShadowing.route)
+                }
+            )
+        }
+
+        // EPUB 跟读页面
+        composable(Screen.EpubShadowing.route,
+            enterTransition = { fadeSlideIn },
+            exitTransition = { fadeSlideOut }
+        ) {
+            val sentences = EpubShadowingDataHolder.sentences ?: emptyList()
+            val bookTitle = EpubShadowingDataHolder.bookTitle
+            EpubShadowingScreen(
+                sentences = sentences,
+                bookTitle = bookTitle,
+                onNavigateBack = {
+                    EpubShadowingDataHolder.sentences = null
+                    navController.popBackStack()
+                }
             )
         }
     }

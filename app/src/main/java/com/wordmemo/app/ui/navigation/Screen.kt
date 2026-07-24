@@ -49,4 +49,13 @@ sealed class Screen(val route: String, val title: String = "", val icon: ImageVe
         }
     }
     data object Progress : Screen("progress", "学习进度", Icons.Default.TrendingUp)
+
+    // EPUB 精听 + 影子跟读
+    data object ReadingBookList : Screen("reading_book_list", "EPUB 精听", Icons.Default.LibraryBooks)
+    data object ReadingPage : Screen("reading_page", "精听阅读") {
+        const val ROUTE = "reading_page"
+    }
+    data object EpubShadowing : Screen("epub_shadowing", "EPUB跟读") {
+        const val ROUTE = "epub_shadowing"
+    }
 }

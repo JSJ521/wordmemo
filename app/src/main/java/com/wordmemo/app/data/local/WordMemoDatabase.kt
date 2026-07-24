@@ -31,6 +31,8 @@ import com.wordmemo.app.data.pronunciation.entity.PhonemeScoreEntity
 import com.wordmemo.app.data.shadowing.dao.ShadowingVideoDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingSentenceDao
 import com.wordmemo.app.data.shadowing.dao.ShadowingRecordDao
+import com.wordmemo.app.data.shadowing.dao.ReadingProgressDao
+import com.wordmemo.app.data.shadowing.entity.ReadingProgressEntity
 import com.wordmemo.app.data.pronunciation.dao.AssessmentRecordDao
 import com.wordmemo.app.data.pronunciation.dao.PhonemeScoreDao
 
@@ -51,9 +53,10 @@ import com.wordmemo.app.data.pronunciation.dao.PhonemeScoreDao
         ShadowingSentenceEntity::class,
         ShadowingRecordEntity::class,
         AssessmentRecordEntity::class,
-        PhonemeScoreEntity::class
+        PhonemeScoreEntity::class,
+        ReadingProgressEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class WordMemoDatabase : RoomDatabase() {
@@ -68,6 +71,7 @@ abstract class WordMemoDatabase : RoomDatabase() {
     abstract fun shadowingVideoDao(): ShadowingVideoDao
     abstract fun shadowingSentenceDao(): ShadowingSentenceDao
     abstract fun shadowingRecordDao(): ShadowingRecordDao
+    abstract fun readingProgressDao(): ReadingProgressDao
     abstract fun assessmentRecordDao(): AssessmentRecordDao
     abstract fun phonemeScoreDao(): PhonemeScoreDao
 

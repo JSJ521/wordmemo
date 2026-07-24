@@ -25,8 +25,8 @@ android {
         applicationId = "com.wordmemo.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 92900
-        versionName = "9.9"
+        versionCode = 100000
+        versionName = "10.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -131,6 +131,9 @@ dependencies {
 
     // Core KTX
     implementation("androidx.core:core-ktx:1.12.0")
+
+    // EPUB 解析
+    implementation("org.jsoup:jsoup:1.17.2")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
