@@ -59,6 +59,8 @@ enum class SubtitleSource {
     EXTERNAL,
     /** 视频内嵌字幕轨道 */
     EMBEDDED,
+    /** OCR 识别硬字幕 */
+    OCR_HARDCODED,
     /** ASR 语音识别生成 */
     ASR_GENERATED,
     /** 没有任何可用字幕 */
@@ -82,6 +84,7 @@ class VideoImportService @Inject constructor(
     private val subtitleExtractor: SubtitleExtractor,
     private val subtitleGenerator: SubtitleGenerator,
     private val voskSubtitleGenerator: VoskSubtitleGenerator,
+    private val hardcodedSubtitleOCR: HardcodedSubtitleOCR,
     private val appConfigDao: AppConfigDao,
     private val bilibiliParser: BilibiliParser,
     private val youTubeParser: YouTubeParser
@@ -720,7 +723,34 @@ class VideoImportService @Inject constructor(
             Log.w(TAG, "内嵌字幕提取失败: ${e.message}")
         }
 
-        // ---- 第3步：ASR 生成 ----
+        // ---- 第3步：OCR 硬字幕识别 ----
+        Log.i(TAG, "尝试 OCR 识别硬字幕: ${videoFile.name}")
+        try {
+            val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_ocr.srt")
+            val ocrResult = hardcodedSubtitleOCR.extractSubtitles(
+                videoPath = videoFile.absolutePath,
+                outputPath = srtFile.absolutePath
+            )
+            if (ocrResult.isSuccess && srtFile.exists() && srtFile.length() > 0) {
+                val content = srtFile.readText()
+                val entries = subtitleParser.parseSrt(content)
+                if (entries.isNotEmpty()) {
+                    val count = saveSentences(videoId, entries)
+                    Log.i(TAG, "OCR 硬字幕识别成功: $count 句")
+                    return SubtitleAcquireResult(
+                        subtitlePath = srtFile.absolutePath,
+                        sentenceCount = count,
+                        source = SubtitleSource.OCR_HARDCODED
+                    )
+                }
+            } else {
+                Log.i(TAG, "OCR 未能识别到硬字幕（可能是视频无硬字幕或字幕不在画面底部）")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "OCR 硬字幕识别失败: ${e.message}")
+        }
+
+        // ---- 第4步：ASR 生成 ----
         Log.i(TAG, "尝试 ASR 生成字幕")
         try {
             val asrResult = tryGenerateAsrSubtitle(videoFile, subtitleDir)
