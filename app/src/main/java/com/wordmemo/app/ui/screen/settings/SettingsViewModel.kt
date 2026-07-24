@@ -27,6 +27,7 @@ data class SettingsUiState(
     val apiKey: String = "",
     val apiBaseUrl: String = "https://api.deepseek.com",
     val apiModel: String = "deepseek-chat",
+    val asrApiKey: String = "",
     val dailyReviewLimit: Int = 13,
     val bilibiliCookie: String = "",
     val youtubeCookie: String = "",
@@ -65,6 +66,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 apiKey = config.firstOrNull { it.key == "api_key" }?.let { cipher.decrypt(it.value) } ?: "",
                 apiBaseUrl = config.firstOrNull { it.key == "api_base_url" }?.value ?: "https://api.deepseek.com",
                 apiModel = config.firstOrNull { it.key == "api_model" }?.value ?: "deepseek-chat",
+                asrApiKey = config.firstOrNull { it.key == "asr_api_key" }?.let { cipher.decrypt(it.value) } ?: "",
                 dailyReviewLimit = config.firstOrNull { it.key == "daily_review_limit" }?.value?.toIntOrNull() ?: 13,
                 bilibiliCookie = config.firstOrNull { it.key == "bilibili_cookies" }?.value ?: "",
                 youtubeCookie = config.firstOrNull { it.key == "youtube_cookies" }?.value ?: ""
@@ -87,12 +89,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_key", cipher.encrypt(state.apiKey)))
             db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_base_url", state.apiBaseUrl))
             db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("api_model", state.apiModel))
+            // ASR 配置（OpenRouter Whisper）
+            if (state.asrApiKey.isNotBlank()) {
+                db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("asr_api_key", cipher.encrypt(state.asrApiKey)))
+                db.appConfigDao().setValue(com.wordmemo.app.data.local.entity.AppConfigEntity("asr_base_url", "https://openrouter.ai/api"))
+            }
             _uiState.value = state.copy(connectionTestResult = "✅ 配置已保存")
         }
     }
 
     fun onApiKeyChanged(key: String) {
         _uiState.value = _uiState.value.copy(apiKey = key)
+    }
+
+    fun onAsrApiKeyChanged(key: String) {
+        _uiState.value = _uiState.value.copy(asrApiKey = key)
     }
 
     fun onBaseUrlChanged(url: String) {

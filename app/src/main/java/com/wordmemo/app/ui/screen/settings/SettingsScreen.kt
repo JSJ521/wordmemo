@@ -78,6 +78,7 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showApiKey by remember { mutableStateOf(false) }
+    var showAsrKey by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -311,18 +312,51 @@ fun SettingsScreen(
                     shape = MaterialTheme.shapes.small
                 ) { Text("导入六级词库 (327词)") }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
 
-                Button(
-                    onClick = { viewModel.optimizeFsrs() },
+                // 分隔：ASR（语音识别）配置
+                Text(
+                    text = "语音识别（Whisper）",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                )
+
+                OutlinedTextField(
+                    value = uiState.asrApiKey,
+                    onValueChange = { viewModel.onAsrApiKeyChanged(it) },
+                    label = { Text("ASR API Key (OpenRouter)") },
+                    placeholder = { Text("sk-or-v1-...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = if (showAsrKey) VisualTransformation.None
+                        else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        TextButton(onClick = { showAsrKey = !showAsrKey }) {
+                            Text(if (showAsrKey) "隐藏" else "显示",
+                                style = MaterialTheme.typography.labelMedium)
+                        }
+                    },
+                    shape = MaterialTheme.shapes.small
+                )
+                Text(
+                    text = "填写 OpenRouter API Key 即可使用在线语音转字幕",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                FilledTonalButton(
+                    onClick = { viewModel.saveApiConfig() },
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.small,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AiBadge
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                     )
-                ) { Text("⚡ 优化 FSRS 参数") }
+                ) { Text("保存配置") }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
 
                 var importUri by remember { mutableStateOf<android.net.Uri?>(null) }
                 val importLauncher = rememberLauncherForActivityResult(
