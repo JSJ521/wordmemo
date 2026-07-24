@@ -1,5 +1,8 @@
 package com.wordmemo.app.shadowing
 
+import com.wordmemo.app.data.shadowing.service.AudioWaveformExtractor
+import com.wordmemo.app.data.shadowing.service.SentenceAudioRecorder
+import com.wordmemo.app.data.shadowing.service.VideoImportService
 import com.wordmemo.app.domain.shadowing.model.ShadowingSentence
 import com.wordmemo.app.domain.shadowing.repository.ShadowingRepository
 import com.wordmemo.app.domain.shadowing.usecase.GetSentencesUseCase
@@ -8,6 +11,7 @@ import com.wordmemo.app.ui.screen.shadowing.RecordingState
 import com.wordmemo.app.ui.screen.shadowing.ShadowingSessionViewModel
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -22,16 +26,26 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.Assert.*
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
 /**
  * ShadowingSessionViewModel 单元测试 — 验证录音状态管理、句子导航、UI State 变化。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class ShadowingSessionViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val getSentencesUseCase = mockk<GetSentencesUseCase>()
     private val shadowingRepository = mockk<ShadowingRepository>()
+    private val videoImportService = mockk<VideoImportService>()
+    private val sentenceAudioRecorder = mockk<SentenceAudioRecorder>()
+    private val audioWaveformExtractor = mockk<AudioWaveformExtractor>()
+    private val context = RuntimeEnvironment.getApplication()
     private lateinit var viewModel: ShadowingSessionViewModel
 
     @Before
@@ -50,7 +64,7 @@ class ShadowingSessionViewModelTest {
     fun `初始状态默认为IDLE`() = runTest {
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
 
         val state = viewModel.uiState.value
         assertEquals(RecordingState.IDLE, state.recordingState)
@@ -69,7 +83,7 @@ class ShadowingSessionViewModelTest {
         )
         coEvery { getSentencesUseCase.invoke(1L) } returns MutableStateFlow(sentences)
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -84,7 +98,7 @@ class ShadowingSessionViewModelTest {
     fun `loadSentences 正常加载后不应有error`() = runTest {
         coEvery { getSentencesUseCase.invoke(1L) } returns MutableStateFlow(emptyList())
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -105,7 +119,7 @@ class ShadowingSessionViewModelTest {
             durationMs = 60000L
         )
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -118,24 +132,45 @@ class ShadowingSessionViewModelTest {
 
     @Test
     fun `startRecording 切换到RECORDING状态`() = runTest {
-        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
+        val sentences = listOf(
+            ShadowingSentence(id = 1, videoId = 1, sentenceIndex = 0, text = "Hello", startTimeMs = 0L, endTimeMs = 1000L)
+        )
+        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
+        coEvery { shadowingRepository.getVideoById(any()) } returns null
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
+        viewModel.loadSentences(1L)
+        advanceUntilIdle()
+
+        every { sentenceAudioRecorder.startRecording(any(), any()) } returns "/tmp/test_recording.mp3"
+        every { sentenceAudioRecorder.getMaxAmplitude() } returns 500
+
         viewModel.startRecording()
         advanceTimeBy(200)
 
         val state = viewModel.uiState.value
         assertEquals(RecordingState.RECORDING, state.recordingState)
         assertTrue(state.isRecording)
+        assertTrue("录音中应有波形条", state.waveformAmplitudes.isNotEmpty())
         viewModel.stopRecording()
         advanceUntilIdle()
     }
 
     @Test
     fun `stopRecording 切换到PLAYBACK状态`() = runTest {
-        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
+        val sentences = listOf(
+            ShadowingSentence(id = 1, videoId = 1, sentenceIndex = 0, text = "Hello", startTimeMs = 0L, endTimeMs = 1000L)
+        )
+        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
+        coEvery { shadowingRepository.getVideoById(any()) } returns null
+        every { sentenceAudioRecorder.startRecording(any(), any()) } returns "/tmp/test_recording.mp3"
+        every { sentenceAudioRecorder.stopRecording() } returns Pair("/tmp/test_recording.mp3", 1500L)
+        every { audioWaveformExtractor.extractFromFile(any()) } returns List(60) { 0.5f }
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
+        viewModel.loadSentences(1L)
+        advanceUntilIdle()
+
         viewModel.startRecording()
         viewModel.stopRecording()
         advanceUntilIdle()
@@ -144,14 +179,25 @@ class ShadowingSessionViewModelTest {
         assertEquals(RecordingState.PLAYBACK, state.recordingState)
         assertFalse(state.isRecording)
         assertTrue(state.hasRecording)
-        assertTrue("停止后波形归零", state.waveformAmplitudes.isEmpty())
+        assertTrue("录音波形应有数据", state.recordedWaveform.isNotEmpty())
     }
 
     @Test
     fun `deleteRecording 重置为IDLE`() = runTest {
-        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
+        val sentences = listOf(
+            ShadowingSentence(id = 1, videoId = 1, sentenceIndex = 0, text = "Hello", startTimeMs = 0L, endTimeMs = 1000L)
+        )
+        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
+        coEvery { shadowingRepository.getVideoById(any()) } returns null
+        every { sentenceAudioRecorder.startRecording(any(), any()) } returns "/tmp/test_recording.mp3"
+        every { sentenceAudioRecorder.stopRecording() } returns Pair("/tmp/test_recording.mp3", 1500L)
+        every { audioWaveformExtractor.extractFromFile(any()) } returns List(60) { 0.5f }
+        every { sentenceAudioRecorder.deleteRecordingForSentence(any(), any()) } returns Unit
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
+        viewModel.loadSentences(1L)
+        advanceUntilIdle()
+
         viewModel.startRecording()
         viewModel.stopRecording()
         viewModel.deleteRecording()
@@ -166,14 +212,28 @@ class ShadowingSessionViewModelTest {
 
     @Test
     fun `playRecording 切换到录音播放源`() = runTest {
-        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
+        val sentences = listOf(
+            ShadowingSentence(id = 1, videoId = 1, sentenceIndex = 0, text = "Hello", startTimeMs = 0L, endTimeMs = 1000L)
+        )
+        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
+        coEvery { shadowingRepository.getVideoById(any()) } returns null
+        every { sentenceAudioRecorder.startRecording(any(), any()) } returns "/tmp/test_recording.mp3"
+        every { sentenceAudioRecorder.stopRecording() } returns Pair("/tmp/test_recording.mp3", 1500L)
+        every { audioWaveformExtractor.extractFromFile(any()) } returns List(60) { 0.5f }
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
+        viewModel.loadSentences(1L)
+        advanceUntilIdle()
+
+        viewModel.startRecording()
+        viewModel.stopRecording()
+        advanceUntilIdle()
+
         viewModel.playRecording()
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
-        assertEquals(AudioSource.RECORDING, state.activeAudioSource)
+        assertTrue(state.isPlayingRecording)
         assertEquals(RecordingState.PLAYBACK, state.recordingState)
     }
 
@@ -181,7 +241,7 @@ class ShadowingSessionViewModelTest {
     fun `switchAudioSource 切换音频源`() = runTest {
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.switchAudioSource(AudioSource.RECORDING)
         assertEquals(AudioSource.RECORDING, viewModel.uiState.value.activeAudioSource)
 
@@ -197,7 +257,7 @@ class ShadowingSessionViewModelTest {
         )
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -218,7 +278,7 @@ class ShadowingSessionViewModelTest {
         )
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -235,7 +295,7 @@ class ShadowingSessionViewModelTest {
         )
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -251,7 +311,7 @@ class ShadowingSessionViewModelTest {
         )
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -269,7 +329,7 @@ class ShadowingSessionViewModelTest {
         )
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -289,7 +349,7 @@ class ShadowingSessionViewModelTest {
         )
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -309,8 +369,12 @@ class ShadowingSessionViewModelTest {
             ShadowingSentence(id = 2, videoId = 1, sentenceIndex = 1, text = "Second", startTimeMs = 1000L, endTimeMs = 2000L)
         )
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
+        coEvery { shadowingRepository.getVideoById(any()) } returns null
+        every { sentenceAudioRecorder.startRecording(any(), any()) } returns "/tmp/test_recording.mp3"
+        every { sentenceAudioRecorder.stopRecording() } returns Pair("/tmp/test_recording.mp3", 1500L)
+        every { audioWaveformExtractor.extractFromFile(any()) } returns List(60) { 0.5f }
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -330,50 +394,41 @@ class ShadowingSessionViewModelTest {
     fun `playOriginalSentence 切换到原声源`() = runTest {
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.playOriginalSentence()
         assertEquals(AudioSource.ORIGINAL, viewModel.uiState.value.activeAudioSource)
     }
 
     @Test
     fun `playUserRecording 切换到录音源`() = runTest {
-        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
+        val sentences = listOf(
+            ShadowingSentence(id = 1, videoId = 1, sentenceIndex = 0, text = "Hello", startTimeMs = 0L, endTimeMs = 1000L)
+        )
+        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
+        coEvery { shadowingRepository.getVideoById(any()) } returns null
+        every { sentenceAudioRecorder.startRecording(any(), any()) } returns "/tmp/test_recording.mp3"
+        every { sentenceAudioRecorder.stopRecording() } returns Pair("/tmp/test_recording.mp3", 1500L)
+        every { audioWaveformExtractor.extractFromFile(any()) } returns List(60) { 0.5f }
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
-        viewModel.playUserRecording()
-        assertEquals(AudioSource.RECORDING, viewModel.uiState.value.activeAudioSource)
-    }
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
+        viewModel.loadSentences(1L)
+        advanceUntilIdle()
 
-    @Test
-    fun `录制状态转换完整流程`() = runTest {
-        coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
-
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
-
-        // IDLE -> RECORDING
         viewModel.startRecording()
-        advanceTimeBy(200)
-        assertEquals(RecordingState.RECORDING, viewModel.uiState.value.recordingState)
-        assertTrue(viewModel.uiState.value.isRecording)
-
-        // RECORDING -> PLAYBACK
         viewModel.stopRecording()
         advanceUntilIdle()
-        assertEquals(RecordingState.PLAYBACK, viewModel.uiState.value.recordingState)
-        assertTrue(viewModel.uiState.value.hasRecording)
 
-        // PLAYBACK -> IDLE (delete)
-        viewModel.deleteRecording()
+        viewModel.playUserRecording()
         advanceUntilIdle()
-        assertEquals(RecordingState.IDLE, viewModel.uiState.value.recordingState)
-        assertFalse(viewModel.uiState.value.hasRecording)
+        assertTrue(viewModel.uiState.value.isPlayingRecording)
+        assertEquals(AudioSource.RECORDING, viewModel.uiState.value.activeAudioSource)
     }
 
     @Test
     fun `togglePlayPause 切换播放暂停状态`() = runTest {
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         assertFalse(viewModel.uiState.value.isPlayingVideo)
 
         viewModel.togglePlayPause()
@@ -387,7 +442,7 @@ class ShadowingSessionViewModelTest {
     fun `setPlaybackSpeed 设置播放速度`() = runTest {
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         assertEquals(1.0f, viewModel.uiState.value.playbackSpeed)
 
         viewModel.setPlaybackSpeed(1.5f)
@@ -398,7 +453,7 @@ class ShadowingSessionViewModelTest {
     fun `seekForward 和 seekBackward`() = runTest {
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
 
         // Start at 0
         assertEquals(0L, viewModel.uiState.value.currentPositionMs)
@@ -430,7 +485,7 @@ class ShadowingSessionViewModelTest {
         )
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(sentences)
 
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
         viewModel.loadSentences(1L)
         advanceUntilIdle()
 
@@ -453,7 +508,7 @@ class ShadowingSessionViewModelTest {
     @Test
     fun `findSentenceAtPosition 返回正确句子索引`() = runTest {
         coEvery { getSentencesUseCase.invoke(any()) } returns MutableStateFlow(emptyList())
-        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository)
+        viewModel = ShadowingSessionViewModel(getSentencesUseCase, shadowingRepository, videoImportService, sentenceAudioRecorder, audioWaveformExtractor, context)
 
         // Test with no sentences
         assertEquals(-1, viewModel.findSentenceAtPosition(0L))

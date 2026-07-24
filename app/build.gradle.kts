@@ -25,8 +25,8 @@ android {
         applicationId = "com.wordmemo.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 80800
-        versionName = "8.8"
+        versionCode = 80900
+        versionName = "8.9"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -119,6 +119,10 @@ dependencies {
 
     // ffmpeg Android wrapper (M1 视频处理)
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlAndroid")
+
+    // Vosk 离线语音识别 (M1 视频→SRT字幕生成)
+    implementation(files("libs/vosk-android-0.3.45.aar"))
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")

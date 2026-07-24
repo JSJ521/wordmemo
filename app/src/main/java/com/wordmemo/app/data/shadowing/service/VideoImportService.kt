@@ -81,6 +81,7 @@ class VideoImportService @Inject constructor(
     private val shadowingSentenceDao: ShadowingSentenceDao,
     private val subtitleExtractor: SubtitleExtractor,
     private val subtitleGenerator: SubtitleGenerator,
+    private val voskSubtitleGenerator: VoskSubtitleGenerator,
     private val appConfigDao: AppConfigDao,
     private val bilibiliParser: BilibiliParser,
     private val youTubeParser: YouTubeParser
@@ -762,14 +763,47 @@ class VideoImportService @Inject constructor(
 
     /**
      * 尝试 ASR 字幕生成。
-     * 如果 ASR 未配置，返回清晰的失败信息。
+     *
+     * 优先级：
+     * 1. Vosk 离线语音识别（零配置，模型首次自动下载）
+     * 2. OpenAI Whisper 在线 API（需配置 asr_base_url + asr_api_key）
      */
     private suspend fun tryGenerateAsrSubtitle(
         videoFile: File,
         subtitleDir: File
     ): Result<String> {
         return withContext(Dispatchers.IO) {
-            // 读取 ASR 配置
+            // ---- 第1优先：Vosk 离线识别 ----
+            val audioFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_audio.wav")
+            val audioResult = subtitleExtractor.extractAudio(
+                videoPath = videoFile.absolutePath,
+                outputPath = audioFile.absolutePath
+            )
+
+            if (audioResult.isSuccess && audioFile.exists() && audioFile.length() > 0) {
+                // 音频提取成功，尝试 Vosk 离线识别
+                val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_vosk.srt")
+                val voskResult = voskSubtitleGenerator.generateSubtitle(
+                    audioWavPath = audioFile.absolutePath,
+                    outputSrtPath = srtFile.absolutePath
+                )
+
+                if (voskResult.isSuccess && srtFile.exists() && srtFile.length() > 0) {
+                    Log.i(TAG, "Vosk 离线语音识别成功: ${srtFile.absolutePath}")
+                    return@withContext Result.success(srtFile.absolutePath)
+                } else {
+                    val err = voskResult.exceptionOrNull()
+                    if (err is VoskNotReadyException) {
+                        Log.w(TAG, "Vosk 模型未就绪（首次使用需联网下载），回退到在线 ASR: ${err.message}")
+                    } else {
+                        Log.w(TAG, "Vosk 识别失败，回退到在线 ASR: ${err?.message}")
+                    }
+                }
+            } else {
+                Log.w(TAG, "音频提取失败，尝试 MP3 格式: ${audioResult.exceptionOrNull()?.message}")
+            }
+
+            // ---- 第2优先：在线 Whisper API ----
             val asrBaseUrl = try {
                 appConfigDao.getValue(SubtitleGenerator.CONFIG_ASR_BASE_URL)
                     ?.value?.ifBlank { null }
@@ -783,46 +817,44 @@ class VideoImportService @Inject constructor(
             if (asrBaseUrl == null || asrApiKey == null) {
                 return@withContext Result.failure(
                     VideoImportException.AsrConfigurationException(
-                        "ASR 未配置。请提供 OpenAI Whisper 兼容 API 的地址和密钥。\n" +
-                            "配置方式：设置页 → ASR 服务地址 + ASR API Key\n" +
-                            "或自行准备 .srt 字幕文件导入。"
+                        "离线 ASR 不可用且在线 ASR 未配置。\n" +
+                            "Vosk 模型尚未下载（需联网下载一次）或在线 ASR 未配置。\n" +
+                            "配置方式：确保网络连接以自动下载 Vosk 模型，" +
+                            "或在设置页配置 ASR 服务地址 + ASR API Key。\n" +
+                            "也可自行准备 .srt 字幕文件导入。"
                     )
                 )
             }
 
-            // 提取音频
-            val audioFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_audio.wav")
-            val audioResult = subtitleExtractor.extractAudio(
-                videoPath = videoFile.absolutePath,
-                outputPath = audioFile.absolutePath
-            )
-
-            if (audioResult.isFailure) {
-                // 尝试 MP3
-                val mp3File = File(subtitleDir, "${videoFile.nameWithoutExtension}_audio.mp3")
-                val mp3Result = subtitleExtractor.extractAudio(
-                    videoPath = videoFile.absolutePath,
-                    outputPath = mp3File.absolutePath
-                )
-                if (mp3Result.isFailure) {
-                    return@withContext Result.failure(
-                        IOException("音频提取失败: ${audioResult.exceptionOrNull()?.message}")
-                    )
-                }
-                // 用 MP3 生成字幕
+            // 用 WAV 调用在线 Whisper API（如果 WAV 已存在且有效）
+            if (audioFile.exists() && audioFile.length() > 0) {
                 val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_asr.srt")
-                return@withContext subtitleGenerator.generateSubtitle(
-                    audioPath = mp3File.absolutePath,
+                val whisperResult = subtitleGenerator.generateSubtitle(
+                    audioPath = audioFile.absolutePath,
                     outputPath = srtFile.absolutePath,
                     asrBaseUrl = asrBaseUrl,
                     asrApiKey = asrApiKey
                 )
+                if (whisperResult.isSuccess) {
+                    return@withContext whisperResult
+                }
             }
 
-            // 用 WAV 生成字幕
+            // 尝试 MP3 格式（在线 Whisper API 使用）
+            val mp3File = File(subtitleDir, "${videoFile.nameWithoutExtension}_audio.mp3")
+            val mp3Result = subtitleExtractor.extractAudio(
+                videoPath = videoFile.absolutePath,
+                outputPath = mp3File.absolutePath
+            )
+            if (mp3Result.isFailure) {
+                return@withContext Result.failure(
+                    IOException("音频提取失败: ${mp3Result.exceptionOrNull()?.message}")
+                )
+            }
+
             val srtFile = File(subtitleDir, "${videoFile.nameWithoutExtension}_asr.srt")
             subtitleGenerator.generateSubtitle(
-                audioPath = audioFile.absolutePath,
+                audioPath = mp3File.absolutePath,
                 outputPath = srtFile.absolutePath,
                 asrBaseUrl = asrBaseUrl,
                 asrApiKey = asrApiKey

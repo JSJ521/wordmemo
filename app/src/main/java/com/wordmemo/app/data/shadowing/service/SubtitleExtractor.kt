@@ -20,6 +20,8 @@ import javax.inject.Singleton
  *
  * 注意：该模块仅处理*内嵌*（软字幕 / 硬字幕流）轨道。
  * 外挂字幕（独立 .srt/.vtt 文件）由 [VideoImportService] 直接处理。
+ *
+ * v8.8 修复：ProcessBuilder → ffmpeg 二进制路径验证 + 可执行权限设置
  */
 @Singleton
 class SubtitleExtractor @Inject constructor(
@@ -27,7 +29,7 @@ class SubtitleExtractor @Inject constructor(
 ) {
     private val TAG = "SubtitleExtractor"
 
-    /** FFmpeg 二进制是否已初始化（init 解压） */
+    /** FFmpeg 二进制是否已初始化 */
     private var initialized = false
 
     /** 外部传参，用于单元测试注入替代路径 */
@@ -45,7 +47,7 @@ class SubtitleExtractor @Inject constructor(
     private val ffmpegPath: String
         get() = File(ffmpegDir, "ffmpeg").absolutePath
 
-    /** ffprobe 二进制路径（可能不存在——部分构建未包含） */
+    /** ffprobe 二进制路径 */
     private val ffprobePath: String
         get() = File(ffmpegDir, "ffprobe").absolutePath
 
@@ -54,11 +56,11 @@ class SubtitleExtractor @Inject constructor(
     /**
      * 确保 FFmpeg 二进制已解压就绪。
      *
-     * 调用 [FFmpeg.getInstance().init] 将内嵌的 `libffmpeg.zip.so`
-     * 解压到 [context.noBackupFilesDir]/youtubedl-android/packages/ffmpeg/，
-     * 之后 [ffmpegPath] 才指向有效的可执行文件。
+     * `libffmpeg.zip.so` 实际是一个 Zip，由 `FFmpeg.getInstance().init()`
+     * 解压到 noBackupFilesDir/youtubedl-android/packages/ffmpeg/。
+     * 解压后 binDir 内含 ffmpeg + ffprobe 等可执行文件。
      *
-     * 线程安全——重复调用仅执行一次。
+     * v8.8 修复：解压后设置可执行权限（ProcessBuilder 需要）。
      */
     private suspend fun ensureInitialized() {
         if (initialized) return
@@ -67,6 +69,13 @@ class SubtitleExtractor @Inject constructor(
                 FFmpeg.getInstance().init(context)
                 initialized = true
                 Log.i(TAG, "FFmpeg 初始化成功，binDir=${ffmpegDir.absolutePath}")
+
+                // ===== v8.8 修复：设置可执行权限 =====
+                ensureExecutable(File(ffmpegPath))
+                ensureExecutable(File(ffprobePath))
+
+                Log.i(TAG, "ffmpeg 可执行检查: exists=${File(ffmpegPath).exists()}, " +
+                        "exec=${File(ffmpegPath).canExecute()}")
             } catch (e: Exception) {
                 Log.e(TAG, "FFmpeg 初始化失败: ${e.message}", e)
                 throw e
@@ -74,7 +83,17 @@ class SubtitleExtractor @Inject constructor(
         }
     }
 
-    // ----- 内部测试辅助 ------------------------------------------
+    /** 确保文件存在且有可执行权限 */
+    private fun ensureExecutable(file: File) {
+        if (!file.exists()) {
+            Log.w(TAG, "文件不存在，跳过权限设置: ${file.absolutePath}")
+            return
+        }
+        if (!file.canExecute()) {
+            Log.i(TAG, "设置可执行权限: ${file.absolutePath}")
+            file.setExecutable(true, false)
+        }
+    }
 
     /** 仅测试用：替换 ffmpeg 目录路径 */
     internal fun setFfmpegDirForTest(dir: File) {
@@ -85,9 +104,6 @@ class SubtitleExtractor @Inject constructor(
 
     /**
      * 检测视频是否包含内嵌字幕轨道。
-     *
-     * @param videoPath 视频文件绝对路径
-     * @return true = 存在至少一个字幕流
      */
     suspend fun hasSubtitleTrack(videoPath: String): Boolean {
         return try {
@@ -109,8 +125,7 @@ class SubtitleExtractor @Inject constructor(
                     ffmpegPath, "-i", videoPath,
                     "-f", "null", "-"
                 )
-                output.contains("Subtitle:", ignoreCase = true) ||
-                    output.matches(Regex("(?s).*Stream.*Subtitle.*"))
+                output.contains("Subtitle:", ignoreCase = true)
             }
         } catch (e: Exception) {
             Log.e(TAG, "检测字幕轨道失败: ${e.message}", e)
@@ -120,23 +135,18 @@ class SubtitleExtractor @Inject constructor(
 
     /**
      * 提取第一个字幕轨道为 SRT 格式。
-     *
-     * @param videoPath  视频文件路径
-     * @param outputPath 输出的 .srt 文件路径
-     * @return Success(outputPath) 或失败信息
      */
     suspend fun extractSubtitle(videoPath: String, outputPath: String): Result<String> {
         return try {
             ensureInitialized()
             val outputFile = File(outputPath)
-            // 确保父目录存在
             outputFile.parentFile?.mkdirs()
 
             val exitCode = execCommandWithExitCode(
                 ffmpegPath,
-                "-y",                     // 覆盖已有文件
+                "-y",
                 "-i", videoPath,
-                "-map", "0:s:0",         // 取第一个字幕流
+                "-map", "0:s:0",
                 "-f", "srt",
                 outputPath
             )
@@ -145,7 +155,7 @@ class SubtitleExtractor @Inject constructor(
                 Log.i(TAG, "字幕提取成功: $outputPath (${outputFile.length()} bytes)")
                 Result.success(outputPath)
             } else {
-                // 尝试用编解码器转换
+                // 尝试用编解码器转换（处理 ass/ssa → srt）
                 val retryExitCode = execCommandWithExitCode(
                     ffmpegPath,
                     "-y",
@@ -158,10 +168,22 @@ class SubtitleExtractor @Inject constructor(
                     Log.i(TAG, "字幕提取成功(c:s srt): $outputPath")
                     Result.success(outputPath)
                 } else {
-                    Result.failure(IOException(
-                        "字幕提取失败，exitCode=$exitCode，retryExitCode=$retryExitCode，" +
-                            "output存在=${outputFile.exists()}，size=${outputFile.length()}"
-                    ))
+                    // 第三次尝试：指定字幕流索引 0，强制输出格式
+                    val retry2ExitCode = execCommandWithExitCode(
+                        ffmpegPath,
+                        "-y",
+                        "-i", videoPath,
+                        "-map", "0:s:0",
+                        outputPath
+                    )
+                    if (retry2ExitCode == 0 && outputFile.exists() && outputFile.length() > 0) {
+                        Log.i(TAG, "字幕提取成功(第三次尝试): $outputPath")
+                        Result.success(outputPath)
+                    } else {
+                        Result.failure(IOException(
+                            "字幕提取失败，3次尝试均无输出。exitCode序列: $exitCode, $retryExitCode, $retry2ExitCode"
+                        ))
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -172,10 +194,6 @@ class SubtitleExtractor @Inject constructor(
 
     /**
      * 提取视频中的音频为 WAV 格式（用于 ASR 语音识别）。
-     *
-     * @param videoPath  视频文件路径
-     * @param outputPath 输出的音频文件路径（建议 .wav 或 .mp3）
-     * @return Success(outputPath) 或失败信息
      */
     suspend fun extractAudio(videoPath: String, outputPath: String): Result<String> {
         return try {
@@ -183,7 +201,6 @@ class SubtitleExtractor @Inject constructor(
             val outputFile = File(outputPath)
             outputFile.parentFile?.mkdirs()
 
-            // 输出格式取扩展名
             val ext = outputPath.substringAfterLast('.', "wav").lowercase()
             val codec = when (ext) {
                 "wav"  -> "pcm_s16le"
@@ -191,17 +208,17 @@ class SubtitleExtractor @Inject constructor(
                 "m4a"  -> "aac"
                 "ogg"  -> "libvorbis"
                 "opus" -> "libopus"
-                else   -> "pcm_s16le" // 默认 WAV
+                else   -> "pcm_s16le"
             }
 
             val exitCode = execCommandWithExitCode(
                 ffmpegPath,
                 "-y",
                 "-i", videoPath,
-                "-vn",                    // 无视频
+                "-vn",
                 "-acodec", codec,
-                "-ar", "16000",           // 16kHz（ASR 最佳采样率）
-                "-ac", "1",               // 单声道
+                "-ar", "16000",
+                "-ac", "1",
                 outputPath
             )
 
@@ -209,23 +226,7 @@ class SubtitleExtractor @Inject constructor(
                 Log.i(TAG, "音频提取成功: $outputPath (${outputFile.length()} bytes)")
                 Result.success(outputPath)
             } else {
-                // 回退：使用默认编码器
-                val fallbackExitCode = execCommandWithExitCode(
-                    ffmpegPath,
-                    "-y",
-                    "-i", videoPath,
-                    "-vn",
-                    "-ar", "16000",
-                    "-ac", "1",
-                    outputPath
-                )
-                if (fallbackExitCode == 0 && outputFile.exists() && outputFile.length() > 0) {
-                    Result.success(outputPath)
-                } else {
-                    Result.failure(IOException(
-                        "音频提取失败，exitCode=$exitCode，fallbackExitCode=$fallbackExitCode"
-                    ))
-                }
+                Result.failure(IOException("音频提取失败，exitCode=$exitCode"))
             }
         } catch (e: Exception) {
             Log.e(TAG, "提取音频异常: ${e.message}", e)
@@ -239,7 +240,6 @@ class SubtitleExtractor @Inject constructor(
     suspend fun listSubtitleStreams(videoPath: String): List<SubtitleStreamInfo> {
         return try {
             ensureInitialized()
-            // 优先 ffprobe
             if (File(ffprobePath).exists()) {
                 val raw = execCommand(
                     ffprobePath,
@@ -258,7 +258,6 @@ class SubtitleExtractor @Inject constructor(
                     )
                 }
             } else {
-                // 回退：解析 ffmpeg -i 输出
                 val raw = execCommand(ffmpegPath, "-i", videoPath)
                 val streamRegex = Regex(
                     """Stream\s+#(\d+:\d+).*?Subtitle:\s*(\w+).*?(\w{2,3}(?:-\w+)?)?"""
@@ -282,19 +281,19 @@ class SubtitleExtractor @Inject constructor(
     // ----- 内部工具方法 ------------------------------------------
 
     /**
-     * 执行命令并返回 stdout + stderr 合并输出。
+     * 执行命令并返回 stdout+stderr 合并输出。
      */
     private fun execCommand(vararg cmd: String): String {
-        val process = ProcessBuilder(*cmd)
+        val pb = ProcessBuilder(*cmd)
             .redirectErrorStream(true)
-            .start()
+        val process = pb.start()
         val output = process.inputStream.bufferedReader().readText()
         process.waitFor(30, TimeUnit.SECONDS)
         return output
     }
 
     /**
-     * 执行命令并返回退出码，同时收集日志。
+     * 执行命令并返回退出码。
      */
     private fun execCommandWithExitCode(vararg cmd: String): Int {
         val pb = ProcessBuilder(*cmd)
@@ -308,7 +307,8 @@ class SubtitleExtractor @Inject constructor(
             -1
         }
         if (exitCode != 0) {
-            Log.w(TAG, "命令 exit=$exitCode:\n${output.take(500)}")
+            val preview = output.take(500).replace('\n', ' ')
+            Log.w(TAG, "命令 exit=$exitCode: $preview")
         }
         return exitCode
     }
