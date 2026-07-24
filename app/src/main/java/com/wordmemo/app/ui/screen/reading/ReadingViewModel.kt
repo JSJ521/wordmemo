@@ -94,11 +94,16 @@ class ReadingViewModel @Inject constructor(
     // ==================== 书架管理 ====================
 
     /**
-     * 初始化：加载已导入的书架列表 + 初始化 TTS。
+     * 初始化：加载已导入的书架列表 + 初始化 TTS + 导入示例书。
      */
     fun initialize() {
         sentenceTTS.initialize()
         loadBookShelf()
+
+        // 如果书架为空，自动导入示例 EPUB
+        if (_uiState.value.books.isEmpty()) {
+            importSampleEpub("midsummer.epub")
+        }
 
         // 监听 TTS 事件
         viewModelScope.launch {
