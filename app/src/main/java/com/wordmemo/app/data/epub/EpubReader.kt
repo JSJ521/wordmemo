@@ -235,8 +235,8 @@ class EpubReader {
                 XmlPullParser.TEXT -> {
                     val text = parser.text?.trim() ?: ""
                     when {
-                        inMetadata && currentTag == "title" && title.isEmpty() -> title = text
-                        inMetadata && currentTag == "creator" && author.isEmpty() -> author = text
+                        inMetadata && currentTag.substringAfter(':') == "title" && title.isEmpty() -> title = text
+                        inMetadata && currentTag.substringAfter(':') == "creator" && author.isEmpty() -> author = text
                     }
                 }
 

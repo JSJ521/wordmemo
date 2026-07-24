@@ -22,7 +22,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
@@ -97,6 +99,7 @@ class ReadingViewModel @Inject constructor(
      * 初始化：加载已导入的书架列表 + 初始化 TTS + 导入示例书。
      */
     fun initialize() {
+        _uiState.update { it.copy(isLoading = true) }
         sentenceTTS.initialize()
         loadBookShelf()
 
@@ -164,7 +167,7 @@ class ReadingViewModel @Inject constructor(
      * 导入 EPUB 文件。
      */
     fun importEpub(uri: Uri) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
                 val book = epubReader.parse(context, uri)
@@ -182,10 +185,14 @@ class ReadingViewModel @Inject constructor(
                 metaFile.writeText("${book.title}|${book.author}|${book.chapters.size}|${destFile.absolutePath}|epub")
 
                 loadBookShelf()
-                _uiState.update { it.copy(isLoading = false) }
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(isLoading = false) }
+                }
             } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(isLoading = false, error = "导入失败: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    _uiState.update {
+                        it.copy(isLoading = false, error = "导入失败: ${e.message}")
+                    }
                 }
             }
         }
@@ -195,7 +202,7 @@ class ReadingViewModel @Inject constructor(
      * 导入 TXT 文件。
      */
     fun importTxt(uri: Uri) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
                 val book = textReader.parse(context, uri)
@@ -213,10 +220,14 @@ class ReadingViewModel @Inject constructor(
                 metaFile.writeText("${book.title}|${book.author}|${book.chapters.size}|${destFile.absolutePath}|txt")
 
                 loadBookShelf()
-                _uiState.update { it.copy(isLoading = false) }
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(isLoading = false) }
+                }
             } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(isLoading = false, error = "导入失败: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    _uiState.update {
+                        it.copy(isLoading = false, error = "导入失败: ${e.message}")
+                    }
                 }
             }
         }
@@ -226,12 +237,14 @@ class ReadingViewModel @Inject constructor(
      * 打开 .txt 文件（直接路径）。
      */
     fun importTxtFromPath(filePath: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
                 val file = File(filePath)
                 if (!file.exists()) {
-                    _uiState.update { it.copy(isLoading = false, error = "文件不存在: $filePath") }
+                    withContext(Dispatchers.Main) {
+                        _uiState.update { it.copy(isLoading = false, error = "文件不存在: $filePath") }
+                    }
                     return@launch
                 }
                 val book = textReader.parseFromFile(file)
@@ -244,10 +257,14 @@ class ReadingViewModel @Inject constructor(
                 metaFile.writeText("${book.title}|${book.author}|${book.chapters.size}|${destFile.absolutePath}|txt")
 
                 loadBookShelf()
-                _uiState.update { it.copy(isLoading = false) }
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(isLoading = false) }
+                }
             } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(isLoading = false, error = "导入失败: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    _uiState.update {
+                        it.copy(isLoading = false, error = "导入失败: ${e.message}")
+                    }
                 }
             }
         }
@@ -257,7 +274,7 @@ class ReadingViewModel @Inject constructor(
      * 导入 assets 中的示例 EPUB。
      */
     fun importSampleEpub(assetPath: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
                 val book = epubReader.parseFromAssets(context, assetPath)
@@ -275,10 +292,14 @@ class ReadingViewModel @Inject constructor(
                 metaFile.writeText("${book.title}|${book.author}|${book.chapters.size}|${destFile.absolutePath}|epub")
 
                 loadBookShelf()
-                _uiState.update { it.copy(isLoading = false) }
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(isLoading = false) }
+                }
             } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(isLoading = false, error = "导入示例失败: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    _uiState.update {
+                        it.copy(isLoading = false, error = "导入示例失败: ${e.message}")
+                    }
                 }
             }
         }
@@ -290,12 +311,14 @@ class ReadingViewModel @Inject constructor(
      * 打开一本书开始阅读。
      */
     fun openBook(bookItem: BookItem) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
                 val file = File(bookItem.filePath)
                 if (!file.exists()) {
-                    _uiState.update { it.copy(isLoading = false, error = "文件不存在") }
+                    withContext(Dispatchers.Main) {
+                        _uiState.update { it.copy(isLoading = false, error = "文件不存在") }
+                    }
                     return@launch
                 }
 
@@ -305,15 +328,17 @@ class ReadingViewModel @Inject constructor(
                     epubReader.parseFromFile(file)
                 }
 
-                _uiState.update {
-                    it.copy(
-                        currentBook = book,
-                        currentChapterIndex = 0,
-                        currentSentenceIndex = -1,
-                        sentences = emptyList(),
-                        translation = null,
-                        isLoading = false
-                    )
+                withContext(Dispatchers.Main) {
+                    _uiState.update {
+                        it.copy(
+                            currentBook = book,
+                            currentChapterIndex = 0,
+                            currentSentenceIndex = -1,
+                            sentences = emptyList(),
+                            translation = null,
+                            isLoading = false
+                        )
+                    }
                 }
 
                 // 尝试恢复进度
@@ -323,11 +348,15 @@ class ReadingViewModel @Inject constructor(
                 loadChapterSentences(startChapter)
 
                 if (savedProgress != null && savedProgress.sentenceIndex >= 0) {
-                    _uiState.update { it.copy(currentSentenceIndex = savedProgress.sentenceIndex) }
+                    withContext(Dispatchers.Main) {
+                        _uiState.update { it.copy(currentSentenceIndex = savedProgress.sentenceIndex) }
+                    }
                 }
             } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(isLoading = false, error = "打开失败: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    _uiState.update {
+                        it.copy(isLoading = false, error = "打开失败: ${e.message}")
+                    }
                 }
             }
         }

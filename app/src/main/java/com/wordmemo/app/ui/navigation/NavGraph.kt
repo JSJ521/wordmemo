@@ -3,6 +3,7 @@ package com.wordmemo.app.ui.navigation
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -24,8 +25,10 @@ import com.wordmemo.app.ui.screen.shadowing.EpubShadowingScreen
 import com.wordmemo.app.ui.screen.pronunciation.AssessmentHomeScreen
 import com.wordmemo.app.ui.screen.pronunciation.AssessmentResultScreen
 import com.wordmemo.app.ui.screen.pronunciation.ProgressScreen
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.wordmemo.app.ui.screen.reading.ReadingBookListScreen
 import com.wordmemo.app.ui.screen.reading.ReadingScreen
+import com.wordmemo.app.ui.screen.reading.ReadingViewModel
 
 private val fadeSlideIn = slideInHorizontally(
     animationSpec = tween(280),
@@ -250,12 +253,18 @@ fun NavGraph(navController: NavHostController) {
         composable(Screen.ReadingPage.route,
             enterTransition = { fadeSlideIn },
             exitTransition = { fadeSlideOut }
-        ) { ReadingScreen(
+        ) { backStackEntry ->
+            val parentEntry = remember(backStackEntry) {
+                navController.getBackStackEntry(Screen.ReadingBookList.route)
+            }
+            val viewModel: ReadingViewModel = hiltViewModel(parentEntry)
+            ReadingScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToShadowing = { sentences ->
                     EpubShadowingDataHolder.sentences = sentences
                     navController.navigate(Screen.EpubShadowing.route)
-                }
+                },
+                viewModel = viewModel
             )
         }
 
