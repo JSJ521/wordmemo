@@ -112,6 +112,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.2.0")
     implementation("androidx.media3:media3-ui:1.2.0")
     implementation("androidx.media3:media3-exoplayer-hls:1.2.0")
+    implementation("androidx.media3:media3-extractor:1.2.0")
 
     // yt-dlp Android wrapper (M1 B站视频下载)
     val youtubedlAndroid = "0.18.1"
